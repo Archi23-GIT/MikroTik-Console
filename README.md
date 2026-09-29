@@ -1,5 +1,7 @@
 # Wspólna konsola API MikroTik
 
+**Aktualna wersja: 1.3.3** (wartość z pliku `VERSION`).
+
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
 Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP. RouterOS API działa przez TCP/IP, dlatego urządzeń bez adresu IP nie można obsłużyć tą aplikacją.
@@ -46,6 +48,64 @@ Uzupełnij adresy i użytkowników w `devices.json`, po czym uruchom:
 
 ```sh
 python3 mikrotik-console.py
+```
+
+## Parametry programów
+
+### `mikrotik-console.py`
+
+```sh
+python3 mikrotik-console.py [--config PLIK_JSON]
+```
+
+| Parametr | Domyślna wartość | Opis |
+|---|---|---|
+| `-h`, `--help` | — | Wyświetla pomoc i kończy działanie. |
+| `-c PLIK_JSON`, `--config PLIK_JSON` | `devices.json` | Wskazuje plik konfiguracji urządzeń. |
+| `--password-prompt` | wyłączony | Ukryty, zgodnościowy przełącznik; hasła i tak są pobierane interaktywnie według `password_mode` w konfiguracji. |
+
+#### Pola pliku `devices.json`
+
+Konfiguracja zawiera sekcję `defaults` ze wspólnymi ustawieniami oraz tablicę `devices` z urządzeniami. Pola urządzenia mogą nadpisać odpowiadające im wartości domyślne.
+
+| Pole | Domyślna wartość | Opis |
+|---|---|---|
+| `defaults` | `{}` | Wspólne ustawienia urządzeń; każde pole można nadpisać w konkretnym wpisie. |
+| `devices` | wymagane | Niepusta tablica urządzeń. |
+| `name` | wymagane | Nazwa urządzenia używana w konsoli; musi być unikalna. |
+| `host` | wymagane | Osiągalny adres IPv4 lub IPv6 routera. |
+| `username` | `admin` | Nazwa użytkownika API. |
+| `port` | `8728` bez TLS, `8729` z TLS | Port TCP API; jawnie podana wartość zastępuje port wynikający z `ssl`. |
+| `ssl` | `false` | `true` włącza API-SSL, `false` używa nieszyfrowanego API. |
+| `verify_ssl` | `true` | Weryfikuje certyfikat API-SSL. Ma znaczenie, gdy `ssl` jest włączone. |
+| `password_mode` | `shared` | `shared` pyta raz o wspólne hasło, a `individual` pyta osobno dla każdego urządzenia. Wpis urządzenia może nadpisać tryb z `defaults`. |
+
+Starsze pliki mogą ustawiać `password_mode` na najwyższym poziomie JSON; nowe konfiguracje powinny umieszczać go w `defaults`.
+
+### `mikrotik-config-builder.py`
+
+```sh
+python3 mikrotik-config-builder.py [PARAMETRY]
+```
+
+| Parametr | Domyślna wartość | Opis |
+|---|---|---|
+| `-h`, `--help` | — | Wyświetla pomoc i kończy działanie. |
+| `--network CIDR` | `10.0.138.0/24` | Podsieć IPv4, którą skaner sprawdza pod kątem dostępności API. |
+| `--username NAZWA` | `admin` | Wspólna nazwa użytkownika API używana do logowania i zapisana w sekcji `defaults`. Hasło jest pytane w terminalu. |
+| `--port PORT` | `8728` | Port TCP API skanowanych routerów. Przy `--ssl` podaj port API-SSL, zwykle `8729`. |
+| `--ssl` | wyłączony | Używa API-SSL zamiast nieszyfrowanego API. |
+| `--insecure` | wyłączony | Wyłącza weryfikację certyfikatu; działa tylko z `--ssl`. |
+| `--timeout SEKUNDY` | `1.5` | Maksymalny czas próby połączenia z jednym adresem. |
+| `--workers LICZBA` | `48` | Maksymalna liczba równoległych prób połączenia. |
+| `--max-hosts LICZBA` | `4096` | Limit liczby adresów do sprawdzenia w podanej podsieci. |
+| `--output PLIK` | `devices.json` | Ścieżka pliku JSON, do którego zostanie zapisana konfiguracja. |
+| `--force` | wyłączony | Zastępuje istniejący plik wynikowy bez pytania. Bez tego przełącznika program pyta o zgodę w terminalu. |
+
+Przykład skanowania innej podsieci z API-SSL i zapisem do osobnego pliku:
+
+```sh
+python3 mikrotik-config-builder.py --network 192.168.88.0/24 --ssl --port 8729 --output routers.json
 ```
 
 ## Obsługa konsoli
