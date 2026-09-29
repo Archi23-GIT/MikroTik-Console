@@ -1,10 +1,14 @@
 # Wspólna konsola API MikroTik
 
-**Aktualna wersja: 1.3.4** (wartość z pliku `VERSION`).
+**Aktualna wersja: 1.3.5** (wartość z pliku `VERSION`).
 
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
 Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP. RouterOS API działa przez TCP/IP, dlatego urządzeń bez adresu IP nie można obsłużyć tą aplikacją.
+
+## Przykładowy ekran
+
+![Przykład działania konsoli MikroTik API](docs/screenshots/mikrotik-console-example.png)
 
 ## Konfiguracja routerów
 
