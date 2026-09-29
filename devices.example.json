@@ -1,0 +1,21 @@
+{
+  "defaults": {
+    "username": "admin",
+    "port": 8728,
+    "ssl": false,
+    "verify_ssl": true,
+    "password_mode": "shared"
+  },
+  "devices": [
+    {
+      "name": "router-dom",
+      "host": "192.168.88.1"
+    },
+    {
+      "name": "router-biuro",
+      "host": "192.168.88.2",
+      "password_mode": "individual"
+    }
+  ]
+}
+
