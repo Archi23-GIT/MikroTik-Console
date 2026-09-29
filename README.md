@@ -1,6 +1,6 @@
 # Wspólna konsola API MikroTik
 
-**Aktualna wersja: 1.3.3** (wartość z pliku `VERSION`).
+**Aktualna wersja: 1.3.4** (wartość z pliku `VERSION`).
 
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
@@ -44,7 +44,7 @@ Nazwa urządzenia pochodzi z RouterOS Identity. Gdy kilka urządzeń ma taką sa
 cp devices.example.json devices.json
 ```
 
-Uzupełnij adresy i użytkowników w `devices.json`, po czym uruchom:
+`devices.example.json` zawiera przykładowe 28 urządzeń `S01R1`–`S14R2` z adresami `10.0.138.1`–`10.0.138.28` i wspólnymi ustawieniami w `defaults`. Przed użyciem dostosuj nazwy i adresy do swojej sieci, po czym uruchom:
 
 ```sh
 python3 mikrotik-console.py
