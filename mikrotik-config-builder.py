@@ -235,7 +235,8 @@ def discover_mndp_ipv6(wait_seconds: float = 35.0) -> list[str]:
             if not scope_id:
                 continue
             try:
-                interface_name = socket.if_indextoname(scope_id)
+                # Windows interface names are not portable IPv6 zone identifiers.
+                interface_name = str(scope_id) if sys.platform == "win32" else socket.if_indextoname(scope_id)
             except (AttributeError, OSError):
                 continue
             for address in _parse_mndp_ipv6(packet):
@@ -246,8 +247,46 @@ def discover_mndp_ipv6(wait_seconds: float = 35.0) -> list[str]:
     return sorted(found, key=_address_sort_key)
 
 
+def _windows_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
+    """Read local IPv4 networks and matching IPv6 scope indices using PowerShell."""
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        "@(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.AddressState -eq 'Preferred' } | "
+        "ForEach-Object { "
+        "$v6 = Get-NetIPInterface -AddressFamily IPv6 -InterfaceAlias $_.InterfaceAlias "
+        "-ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "[pscustomobject]@{ Address=$_.IPAddress; Prefix=$_.PrefixLength; Scope=$v6.InterfaceIndex } "
+        "}) | ConvertTo-Json -Compress"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "PowerShell failed")
+        records = json.loads(result.stdout.strip() or "[]")
+        if isinstance(records, dict):
+            records = [records]
+        interfaces = []
+        for record in records:
+            address = ipaddress.IPv4Address(record["Address"])
+            network = ipaddress.IPv4Network((str(address), int(record["Prefix"])), strict=False)
+            scope = str(record.get("Scope") or "")
+            if address.is_loopback or address.is_link_local or address.is_unspecified or network.prefixlen >= 31:
+                continue
+            interfaces.append((scope, str(address), str(network.broadcast_address)))
+        return interfaces
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError) as exc:
+        print(tr(f"Nie można odczytać interfejsów Windows dla MNDP IPv4: {exc}",
+                 f"Cannot read Windows interfaces for IPv4 MNDP: {exc}"), file=sys.stderr)
+        return []
+
+
 def _local_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
     """Return (interface, local IPv4, directed broadcast) from ifconfig."""
+    if sys.platform == "win32":
+        return _windows_ipv4_broadcast_interfaces()
     try:
         result = subprocess.run(["/sbin/ifconfig", "-a"], capture_output=True,
                                 text=True, timeout=5, check=False)
@@ -270,7 +309,7 @@ def _local_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
             mask_index = fields.index("netmask")
             raw_mask = fields[mask_index + 1]
             mask_value = int(raw_mask, 16) if raw_mask.startswith("0x") else int(ipaddress.IPv4Address(raw_mask))
-            network = ipaddress.IPv4Network((address, mask_value), strict=False)
+            network = ipaddress.IPv4Network((str(address), str(ipaddress.IPv4Address(mask_value))), strict=False)
         except (ValueError, IndexError):
             continue
         if address.is_unspecified or address.is_loopback or address.is_link_local or network.prefixlen >= 31:
@@ -320,7 +359,8 @@ def discover_mndp_ipv4(wait_seconds_per_interface: float = 1.5) -> dict[str, str
                         continue
                     break
                 for address in _parse_mndp_ipv6(packet):
-                    found[f"{address}%{interface}"] = interface
+                    if interface:
+                        found[f"{address}%{interface}"] = interface
                 # IPv4 MNDP packets can still bootstrap a RouterOS API query;
                 # its /ip/neighbor table then supplies link-local IPv6 peers.
                 for address in _parse_mndp_ipv4(packet):
@@ -512,12 +552,14 @@ async def run(args: argparse.Namespace) -> int:
     if not found:
         print(tr("Nie znaleziono urządzeń z dostępnym API i podanymi danymi logowania.", "No devices found with an accessible API and the supplied credentials."), file=sys.stderr)
         for address, error in failures:
-            print(f"  [{address}] {error}", file=sys.stderr)
+            if ":" in address:
+                print(f"  [{address}] {error}", file=sys.stderr)
         return 1
     if failures:
-        print(tr(f"Uwaga: API nie odpowiedziało poprawnie dla {len(failures)} z {len(attempted)} sprawdzonych adresów:", f"Warning: the API did not respond successfully for {len(failures)} of {len(attempted)} addresses checked:"))
+        print(tr(f"Uwaga: API nie odpowiedziało poprawnie dla {len(failures)} z {len(attempted)} sprawdzonych adresów.", f"Warning: the API did not respond successfully for {len(failures)} of {len(attempted)} addresses checked."))
         for address, error in failures:
-            print(f"  [{address}] {error}")
+            if ":" in address:
+                print(f"  [{address}] {error}")
 
     devices = unique_device_names(found)
     duplicates = len(found) - len(devices)

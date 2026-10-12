@@ -9,7 +9,6 @@ import getpass
 import json
 import os
 import re
-import readline
 import shlex
 import shutil
 import ssl
@@ -20,6 +19,11 @@ from pathlib import Path
 
 from mikrotik_language import add_language_argument, configure_language, tr
 from typing import Any
+
+try:
+    import readline
+except ImportError:
+    readline = None
 
 
 @dataclass
@@ -378,6 +382,20 @@ COMPLETIONS = [
 
 
 def setup_completion(device_names: list[str]) -> None:
+    if readline is None:
+        if sys.platform == "win32":
+            print(tr(
+                "Brak modułu readline: aby włączyć podpowiedzi Tab na Windows, "
+                "zainstaluj zamiennik: py -m pip install --upgrade pyreadline3. "
+                "Użyj tego samego Pythona do instalacji i uruchamiania konsoli, "
+                "a następnie uruchom konsolę ponownie.",
+                "The readline module is missing. To enable Tab completion on Windows, "
+                "install its replacement: py -m pip install --upgrade pyreadline3. "
+                "Use the same Python for installation and running the console, "
+                "then restart the console.",
+            ), file=sys.stderr)
+        return
+
     def complete(text: str, state: int) -> str | None:
         buffer = readline.get_line_buffer()
         # libedit on macOS may treat `/` as a word break even after setting

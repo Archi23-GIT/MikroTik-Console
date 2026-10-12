@@ -2,11 +2,94 @@
 
 **English** | [Polski](README_PL.md)
 
-**Current version: 1.5.1** (recorded in `VERSION`).
+**Current version: 1.5.5** (recorded in `VERSION`).
 
 The console connects to multiple routers through the native RouterOS API. It keeps a separate API connection to each router, runs commands concurrently, and displays replies as records labeled with the device name.
 
 Each MikroTik must have a configured, reachable IPv4 or IPv6 address. The RouterOS API uses TCP/IP, so this application cannot manage devices without an IP address.
+
+## Python and operating system requirements
+
+The minimum Python version inferred from the code is **3.9**: the console uses `asyncio.to_thread()`, introduced in 3.9. For a new installation, use **Python 3.12 or newer** from a supported release. The current automated tests have been run on **CPython 3.12.14 on macOS**; this is not a claim that every Python version or operating system has been tested.
+
+The scripts use the Python standard library; no `pip install` step is required on macOS or Linux with a complete Python installation. Keep `mikrotik-console.py`, `mikrotik-config-builder.py`, and `mikrotik_language.py` in the same directory. The console also needs `devices.json`, created manually or by the builder. Run commands from that directory in an interactive terminal.
+
+| System | Python installation | Current application limitations |
+|---|---|---|
+| macOS, Intel or Apple Silicon | Python 3.12+ from python.org or Homebrew; run with `python3` | Main development/test platform. Tab completion uses the optional `readline` module, backed by GNU readline or libedit; the console also runs without it. |
+| Windows 11 | Python 3.12+ from python.org; run with `py -3` | Explicit IPv4/IPv6 prefix scanning uses portable Python APIs, but is not tested here on Windows. The console runs without `readline`; Tab completion is unavailable in that case. Native Windows API connections have not been tested here. Automatic MNDP discovery is not validated on Windows. |
+| Linux, including Ubuntu 26.04 LTS | Distribution Python 3.12+; Ubuntu 26.04 supplies Python 3.14 through `python3` | Tab completion requires `readline`; it is optional for running the console. Prefix scanning uses portable APIs but has not been tested here on Linux. The IPv4 broadcast stage of automatic MNDP discovery uses macOS-specific `ifconfig` parsing and is not portable to Linux as currently implemented; the IPv6 multicast stage is separate. |
+
+### macOS
+
+Install a supported Python 3.12+ build from [python.org](https://www.python.org/downloads/macos/), or use Homebrew if it is already installed:
+
+```sh
+brew install python
+python3 --version
+python3 -c "import asyncio, ssl, readline; print('Python modules OK')"
+python3 mikrotik-config-builder.py --ipv6 --lang en
+python3 mikrotik-console.py --lang en
+```
+
+Do not assume that the Python supplied by Apple or developer tools meets the requirements: check the interpreter actually selected by `python3`.
+
+### Windows 11
+
+Install Python using the [official Windows downloads](https://www.python.org/downloads/windows/). With the Python install manager, install a runtime and verify it in PowerShell:
+
+```powershell
+py install 3.14
+py -3 --version
+py -3 mikrotik-config-builder.py --network 192.168.99.0/24 --lang en
+```
+
+`py install` applies to the new Python install manager. If you use a traditional installer, select a Python 3.12+ release and verify it with `py -3 --version` instead.
+
+Since version 1.5.3, `readline` is optional. Stock Windows Python can start the console without installing additional packages; Tab completion is unavailable without `readline`. To enable it or fix `ModuleNotFoundError: No module named 'readline'` in older versions, follow the [Windows installation instructions below](#installing-windows-tab-completion).
+
+```powershell
+py -3 .\mikrotik-console.py --lang en
+```
+
+Do not treat WSL as equivalent to native Windows for local-link MNDP discovery; its network setup must be checked separately.
+
+### Windows IPv6 discovery
+
+Since 1.5.5, automatic discovery reads IPv4 broadcast interfaces using PowerShell and uses numeric IPv6 scope IDs on Windows (for example `fe80::1%12`). This has been tested with simulated interface data, not on a Windows network. If discovery returns no addresses, check IPv6 on the active adapter, local network connectivity, MNDP on the routers, and Windows Firewall permissions for Python to receive UDP/5678 on the trusted local network. Close WinBox and retry if it is using the discovery port. You can bypass MNDP using `--ipv6 --network` with a small reachable prefix. A missing discovery reply does not establish that the router API is unavailable.
+
+### Installing Windows Tab completion
+
+Windows does not include the Unix `readline` module. Install the Windows replacement [pyreadline3](https://pypi.org/project/pyreadline3/), which provides a `readline` compatibility module. In PowerShell, use the same Python launcher for installation and execution:
+
+```powershell
+py -m pip install --upgrade pyreadline3
+py -c "import readline; print(readline.__file__)"
+py .\mikrotik-console.py --lang en
+```
+
+If `pip` is missing, run `py -m ensurepip --upgrade` and retry installation. If you select a specific interpreter, use that selection in every command, for example `py -3.14 -m pip install --upgrade pyreadline3` and `py -3.14 .\mikrotik-console.py`. In a virtual environment, use its `python -m pip` and `python` commands instead. Restart the console after installation.
+
+Without the module, the console displays this installation hint and runs without Tab completion. Do not install the old `pyreadline` package. The replacement has not been tested here on Windows 11; the check above verifies that your interpreter can import it.
+
+### Ubuntu 26.04 LTS
+
+Install the distribution's Python without replacing the system interpreter:
+
+```sh
+sudo apt update
+sudo apt install python3
+python3 --version
+python3 -c "import asyncio, ssl, readline; print('Python modules OK')"
+python3 mikrotik-config-builder.py --network 192.168.99.0/24 --lang en
+python3 mikrotik-console.py --lang en
+```
+
+`pip`, `python3-dev`, and a virtual environment are not required to run this version. Installing `net-tools` alone does not fix automatic MNDP's IPv4 stage: the code also expects macOS output formatting. Use an explicit reachable prefix for predictable scanning on Linux until that discovery stage is ported.
+
+Across all systems, the computer must be able to reach the routers' API TCP port (8728 or 8729). Automatic discovery additionally needs local-link UDP/5678 traffic and IPv6 enabled. No administrator/root privileges are required by the application itself; installing system packages may require them.
+
+Sources: [Python asyncio documentation](https://docs.python.org/3.12/library/asyncio-task.html#asyncio.to_thread), [readline availability](https://docs.python.org/3.12/library/readline.html), [Ubuntu 26.04 python3 package](https://packages.ubuntu.com/resolute/python3).
 
 ## Example screen
 
@@ -57,7 +140,7 @@ By default, the builder uses unencrypted API on port 8728 and saves the result t
 
 With `--ipv6` and no `--network`, the builder sends MNDP requests on UDP/5678 using IPv4 broadcasts (limited and directed broadcasts on each local interface) and IPv6 multicast. It waits 35 seconds to cover the default 30-second RouterOS announcement interval. It extracts IPv6 addresses from announcements and uses IPv4 addresses as temporary connections to read `/ip/neighbor/print`. It then tries the IPv6 addresses of neighbors visible to those routers, including devices whose announcements were not received directly by the computer. Temporary IPv4 addresses are excluded from `devices.json`; this mode saves IPv6 addresses.
 
-Discovery uses MNDP and RouterOS neighbor tables. It does not use the general macOS neighbor table, which can include unrelated devices and system interfaces. No subnet is required in automatic IPv6 mode. After discovery, the builder attempts API login. Failed addresses are reported individually.
+Discovery uses MNDP and RouterOS neighbor tables. It does not use the general macOS neighbor table, which can include unrelated devices and system interfaces. No subnet is required in automatic IPv6 mode. After discovery, the builder attempts API login. IPv4 failures are summarized by count without listing each address. IPv6 failures are reported individually.
 
 Link-local addresses (`fe80::`) work only on the link where they were discovered. The builder includes the computer's interface identifier in `host`, for example `fe80::2ec8:1bff:fe05:2a4e%en0`; the console uses it for IPv6 connections. Discovery covers the computer's local links and does not cross routers into other VLANs or subnets. Neighbor-table addresses are accepted only from MikroTik neighbor records returned by the routers.
 

@@ -2,11 +2,94 @@
 
 [English](README.md) | **Polski**
 
-**Aktualna wersja: 1.5.1** (wartość z pliku `VERSION`).
+**Aktualna wersja: 1.5.5** (wartość z pliku `VERSION`).
 
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
 Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP — IPv4 albo IPv6. RouterOS API działa przez TCP/IP, dlatego urządzeń bez adresu IP nie można obsłużyć tą aplikacją.
+
+## Wymagania dotyczące Pythona i systemu operacyjnego
+
+Minimalna wersja Pythona wynikająca z kodu to **3.9**: konsola używa `asyncio.to_thread()`, dostępnego od 3.9. Do nowej instalacji zalecany jest **Python 3.12 lub nowszy**, z nadal wspieranej gałęzi. Aktualne testy automatyczne uruchomiono na **CPython 3.12.14 w macOS**; nie oznacza to przetestowania wszystkich wersji Pythona i systemów.
+
+Skrypty korzystają z biblioteki standardowej Pythona. W macOS i Linux z pełną instalacją Pythona nie trzeba wykonywać `pip install`. Pliki `mikrotik-console.py`, `mikrotik-config-builder.py` i `mikrotik_language.py` muszą znajdować się w jednym katalogu. Konsola potrzebuje też `devices.json`, przygotowanego ręcznie lub przez generator. Polecenia uruchamiaj z tego katalogu w interaktywnym terminalu.
+
+| System | Instalacja Pythona | Aktualne ograniczenia aplikacji |
+|---|---|---|
+| macOS, Intel lub Apple Silicon | Python 3.12+ z python.org albo Homebrew; uruchamianie przez `python3` | Główna platforma rozwoju i testów. Podpowiedzi Tab korzystają z opcjonalnego modułu `readline`, opartego na GNU readline lub libedit; konsola działa również bez niego. |
+| Windows 11 | Python 3.12+ z python.org; uruchamianie przez `py -3` | Skanowanie podanego prefiksu IPv4/IPv6 używa przenośnych API Pythona, ale nie zostało tu przetestowane na Windows. Konsola działa bez `readline`, ale wtedy podpowiedzi Tab są niedostępne. Natywne połączenia API na Windows nie zostały tu przetestowane. Automatyczne wykrywanie MNDP nie zostało zweryfikowane na Windows. |
+| Linux, w tym Ubuntu 26.04 LTS | Python 3.12+ z dystrybucji; Ubuntu 26.04 dostarcza Python 3.14 w pakiecie `python3` | Podpowiedzi Tab wymagają `readline`; moduł jest opcjonalny przy uruchamianiu konsoli. Skanowanie podanego prefiksu używa przenośnych API, ale nie zostało tu przetestowane na Linux. Etap automatycznego MNDP przez IPv4 broadcast korzysta z parsowania `ifconfig` właściwego dla macOS i wymaga dostosowania do Linux; etap IPv6 multicast jest osobny. |
+
+### macOS
+
+Zainstaluj wspieraną wersję Pythona 3.12+ z [python.org](https://www.python.org/downloads/macos/) albo użyj Homebrew, jeśli masz je już zainstalowane:
+
+```sh
+brew install python
+python3 --version
+python3 -c "import asyncio, ssl, readline; print('Python modules OK')"
+python3 mikrotik-config-builder.py --ipv6 --lang pl
+python3 mikrotik-console.py --lang pl
+```
+
+Nie zakładaj, że Python dostarczony przez Apple lub narzędzia programistyczne spełnia wymagania: sprawdź interpreter rzeczywiście uruchamiany poleceniem `python3`.
+
+### Windows 11
+
+Zainstaluj Python z [oficjalnej strony dla Windows](https://www.python.org/downloads/windows/). Korzystając z Python install manager, zainstaluj interpreter i sprawdź go w PowerShell:
+
+```powershell
+py install 3.14
+py -3 --version
+py -3 mikrotik-config-builder.py --network 192.168.99.0/24 --lang pl
+```
+
+`py install` dotyczy nowego Python install manager. Jeśli używasz tradycyjnego instalatora, wybierz Python 3.12+ i sprawdź go przez `py -3 --version`.
+
+Od wersji 1.5.3 moduł `readline` jest opcjonalny. Standardowy Python Windows może uruchomić konsolę bez instalowania dodatkowych pakietów; bez `readline` podpowiedzi Tab są niedostępne. Aby je włączyć lub usunąć błąd `ModuleNotFoundError: No module named 'readline'` w starszych wersjach, wykonaj [instrukcję instalacji dla Windows poniżej](#instalacja-podpowiedzi-tab-na-windows).
+
+```powershell
+py -3 .\mikrotik-console.py --lang pl
+```
+
+WSL nie jest równoważny natywnemu Windows przy wykrywaniu MNDP w lokalnym segmencie; jego konfigurację sieci trzeba sprawdzić osobno.
+
+### Wykrywanie IPv6 na Windows
+
+Od 1.5.5 automatyczne wykrywanie odczytuje interfejsy IPv4 broadcast przez PowerShell i używa liczbowych identyfikatorów zakresu IPv6 na Windows (np. `fe80::1%12`). Sprawdzono to na symulowanych danych interfejsów, a nie w sieci Windows. Jeśli wykrywanie nie zwraca adresów, sprawdź IPv6 na aktywnej karcie, połączenie z lokalnym segmentem, MNDP na routerach oraz zgodę Zapory Windows na odbiór przez Python ruchu UDP/5678 w zaufanej sieci lokalnej. Jeśli WinBox korzysta z portu wykrywania, zamknij go i ponów próbę. MNDP można ominąć, podając `--ipv6 --network` z małym, osiągalnym prefiksem. Brak odpowiedzi MNDP nie oznacza, że API routera jest niedostępne.
+
+### Instalacja podpowiedzi Tab na Windows
+
+Windows nie zawiera uniksowego modułu `readline`. Zainstaluj zamiennik dla Windows — [pyreadline3](https://pypi.org/project/pyreadline3/), który udostępnia zgodny moduł `readline`. W PowerShell użyj tego samego Pythona do instalacji i uruchamiania:
+
+```powershell
+py -m pip install --upgrade pyreadline3
+py -c "import readline; print(readline.__file__)"
+py .\mikrotik-console.py --lang pl
+```
+
+Jeśli brakuje `pip`, wykonaj `py -m ensurepip --upgrade` i ponów instalację. Jeśli wybierasz konkretny interpreter, stosuj ten sam wybór w każdym poleceniu, np. `py -3.14 -m pip install --upgrade pyreadline3` i `py -3.14 .\mikrotik-console.py`. W środowisku wirtualnym używaj jego poleceń `python -m pip` i `python`. Po instalacji uruchom konsolę ponownie.
+
+Bez modułu konsola pokazuje wskazówkę instalacji i działa bez podpowiedzi Tab. Nie instaluj starego pakietu `pyreadline`. Zamiennik nie został tu przetestowany na Windows 11; podane polecenie sprawdza, czy Twój interpreter potrafi go zaimportować.
+
+### Ubuntu 26.04 LTS
+
+Zainstaluj Python z repozytorium dystrybucji bez zastępowania systemowego interpretera:
+
+```sh
+sudo apt update
+sudo apt install python3
+python3 --version
+python3 -c "import asyncio, ssl, readline; print('Python modules OK')"
+python3 mikrotik-config-builder.py --network 192.168.99.0/24 --lang pl
+python3 mikrotik-console.py --lang pl
+```
+
+Do uruchomienia tej wersji nie są wymagane `pip`, `python3-dev` ani środowisko wirtualne. Sama instalacja `net-tools` nie naprawia etapu MNDP przez IPv4: kod oczekuje także formatu wyjścia macOS. Do czasu dostosowania tego etapu na Linux używaj jawnie podanego, osiągalnego prefiksu.
+
+Na każdym systemie komputer musi mieć dostęp do portu TCP API routerów (8728 albo 8729). Automatyczne wykrywanie wymaga dodatkowo ruchu UDP/5678 w lokalnym segmencie i włączonego IPv6. Sama aplikacja nie wymaga uprawnień administratora/root; mogą być potrzebne do instalacji pakietów systemowych.
+
+Źródła: [dokumentacja asyncio](https://docs.python.org/3.12/library/asyncio-task.html#asyncio.to_thread), [dostępność readline](https://docs.python.org/3.12/library/readline.html), [pakiet python3 w Ubuntu 26.04](https://packages.ubuntu.com/resolute/python3).
 
 ## Przykładowy ekran
 
@@ -55,7 +138,7 @@ Program domyślnie używa nieszyfrowanego API na porcie 8728 i zapisuje wynik do
 
 W trybie `--ipv6` program wysyła zapytania MNDP UDP/5678 przez IPv4 broadcast (ogólny i skierowany na każdy lokalny interfejs) oraz IPv6 multicast. Czeka 35 sekund, uwzględniając domyślny, 30-sekundowy cykl ogłoszeń RouterOS. Z ogłoszeń pobiera adresy IPv6, a adresy IPv4 wykorzystuje dodatkowo jako tymczasowy punkt połączenia do odczytania `/ip/neighbor/print`. Następnie próbuje po IPv6 dotrzeć do sąsiadów widocznych routerom, także gdy komputer nie odebrał ich ogłoszeń bezpośrednio. Tymczasowe adresy IPv4 nie trafiają do `devices.json`; wynik zawiera adresy IPv6.
 
-Wykrywanie korzysta z MNDP i tablic sąsiadów RouterOS, a nie ogólnej tablicy sąsiadów macOS, która może zawierać inne urządzenia i interfejsy systemowe. Nie wymaga podawania podsieci. Po wykryciu program próbuje zalogować się do API; hasło musi być prawidłowe, a usługa API dostępna. Jeśli część adresów nie odpowie, builder pokaże osobny błąd dla każdego hosta.
+Wykrywanie korzysta z MNDP i tablic sąsiadów RouterOS, a nie ogólnej tablicy sąsiadów macOS, która może zawierać inne urządzenia i interfejsy systemowe. Nie wymaga podawania podsieci. Po wykryciu program próbuje zalogować się do API; hasło musi być prawidłowe, a usługa API dostępna. Dla IPv4 builder wyświetla jedynie liczbę nieudanych prób, bez listy poszczególnych adresów. Dla IPv6 nadal pokazuje osobny błąd dla każdego hosta.
 
 Adresy link-local `fe80::` działają tylko w segmencie, w którym zostały wykryte. Program zapisuje w `host` również identyfikator interfejsu komputera, np. `fe80::2ec8:1bff:fe05:2a4e%en0`; konsola używa go przy połączeniu przez IPv6. Wykrywanie obejmuje lokalne łącza komputera i nie przechodzi przez routery do innych VLAN-ów ani podsieci. Adresy z tabel sąsiadów są używane tylko pochodząc z odpowiedzi routerów MikroTik.
 
