@@ -17,6 +17,8 @@ import sys
 import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from mikrotik_language import add_language_argument, configure_language, tr
 from typing import Any
 
 
@@ -39,32 +41,32 @@ def read_config(path: Path) -> tuple[list[Device], str]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Nie można odczytać konfiguracji {path}: {exc}") from exc
+        raise ValueError(tr(f"Nie można odczytać konfiguracji {path}: {exc}", f"Cannot read configuration {path}: {exc}")) from exc
     entries = data.get("devices") if isinstance(data, dict) else None
     defaults = data.get("defaults", {}) if isinstance(data, dict) else {}
     if not isinstance(defaults, dict):
-        raise ValueError('Sekcja "defaults" musi być obiektem JSON.')
+        raise ValueError(tr('Sekcja "defaults" musi być obiektem JSON.', 'The "defaults" section must be a JSON object.'))
     # Keep loading older configuration files while preferring shared defaults.
     default_password_mode = defaults.get("password_mode", data.get("password_mode", "shared")) if isinstance(data, dict) else "shared"
     if default_password_mode not in ("shared", "individual"):
-        raise ValueError('"password_mode" musi mieć wartość "shared" albo "individual".')
+        raise ValueError(tr('"password_mode" musi mieć wartość "shared" albo "individual".', '"password_mode" must be "shared" or "individual".'))
     if not isinstance(entries, list) or not entries:
-        raise ValueError('Plik musi zawierać niepustą tablicę "devices".')
+        raise ValueError(tr('Plik musi zawierać niepustą tablicę "devices".', 'The file must contain a nonempty "devices" array.'))
     devices: list[Device] = []
     names: set[str] = set()
     for item in entries:
         if not isinstance(item, dict) or not all(item.get(k) for k in ("name", "host")):
-            raise ValueError("Każde urządzenie musi mieć pola name i host.")
+            raise ValueError(tr("Każde urządzenie musi mieć pola name i host.", "Each device must have name and host fields."))
         name = str(item["name"])
         if name in names:
-            raise ValueError(f"Nazwa urządzenia powtarza się: {name}")
+            raise ValueError(tr(f"Nazwa urządzenia powtarza się: {name}", f"Duplicate device name: {name}"))
         names.add(name)
         username = item.get("username", defaults.get("username", "admin"))
         use_ssl = bool(item.get("ssl", defaults.get("ssl", False)))
         default_port = 8729 if use_ssl else 8728
         password_mode = item.get("password_mode", default_password_mode)
         if password_mode not in ("shared", "individual"):
-            raise ValueError(f'Nieprawidłowy password_mode dla urządzenia {name}: użyj "shared" albo "individual".')
+            raise ValueError(tr(f'Nieprawidłowy password_mode dla urządzenia {name}: użyj "shared" albo "individual".', f'Invalid password_mode for device {name}: use "shared" or "individual".'))
         devices.append(Device(
             name=name, host=str(item["host"]), username=str(username),
             port=int(item.get("port", defaults.get("port", default_port))), password_mode=password_mode,
@@ -126,7 +128,7 @@ def parse_command(line: str) -> list[str]:
     try:
         tokens = shlex.split(line, posix=True)
     except ValueError as exc:
-        raise ValueError(f"Niepoprawne cudzysłowy: {exc}") from exc
+        raise ValueError(tr(f"Niepoprawne cudzysłowy: {exc}", f"Invalid quoting: {exc}")) from exc
     if len(tokens) == 1 and tokens[0].strip("/") == "cancel":
         return ["/cancel"]
     # Accept both RouterOS menu paths (`/system package update ...`) and
@@ -235,7 +237,7 @@ async def connect_device(device: Device) -> None:
 
 async def execute(device: Device, command: list[str], output: asyncio.Queue) -> None:
     if not device.writer or not device.reader or device.writer.is_closing():
-        raise ConnectionError("połączenie jest zamknięte")
+        raise ConnectionError(tr("połączenie jest zamknięte", "connection is closed"))
     async with device.lock:
         await write_sentence(device.writer, command)
         traps: list[str] = []
@@ -271,7 +273,7 @@ async def output_printer(queue: asyncio.Queue) -> None:
         values = [value or 0 for value in progress.values()]
         average = sum(values) // max(1, len(values))
         ready = sum(value == 100 for value in values)
-        line = f"Pobieranie pakietów: {ready}/{len(values)} gotowe, średnio {average}% | [{name}] {status}"
+        line = tr(f"Pobieranie pakietów: {ready}/{len(values)} gotowe, średnio {average}% | [{name}] {status}", f"Downloading packages: {ready}/{len(values)} ready, average {average}% | [{name}] {status}")
         width = max(48, shutil.get_terminal_size((120, 24)).columns)
         line = textwrap.shorten(line, width=width, placeholder="…")
         if tty:
@@ -294,7 +296,7 @@ async def output_printer(queue: asyncio.Queue) -> None:
                 if progress_active:
                     print(flush=True)
                 ready = sum(value == 100 for value in progress.values())
-                print(f"Pobieranie zakończone: {ready}/{len(progress)} routerów zgłosiło komplet pakietów. RouterOS prosi o restart.", flush=True)
+                print(tr(f"Pobieranie zakończone: {ready}/{len(progress)} routerów zgłosiło komplet pakietów. RouterOS prosi o restart.", f"Download complete: {ready}/{len(progress)} routers reported all packages ready. RouterOS requests a reboot."), flush=True)
             progress.clear()
             progress_seen = False
             progress_active = False
@@ -327,12 +329,12 @@ async def output_printer(queue: asyncio.Queue) -> None:
             if progress_active:
                 print(flush=True)
                 progress_active = False
-            print(f"[{name}] BŁĄD: {fields.get('message', fields)}", file=sys.stderr, flush=True)
+            print(tr(f"[{name}] BŁĄD: {fields.get('message', fields)}", f"[{name}] ERROR: {fields.get('message', fields)}"), file=sys.stderr, flush=True)
         elif kind == "!fatal":
             if progress_active:
                 print(flush=True)
                 progress_active = False
-            print(f"[{name}] BŁĄD KRYTYCZNY: {fields}", file=sys.stderr, flush=True)
+            print(tr(f"[{name}] BŁĄD KRYTYCZNY: {fields}", f"[{name}] FATAL ERROR: {fields}"), file=sys.stderr, flush=True)
 
 
 COMPLETIONS = [
@@ -421,23 +423,23 @@ async def close_device(device: Device) -> None:
 
 
 async def reconnect_devices(devices: list[Device]) -> dict[str, Device]:
-    print("Zamykam stare sesje i łączę ponownie ze wszystkimi urządzeniami...")
+    print(tr("Zamykam stare sesje i łączę ponownie ze wszystkimi urządzeniami...", "Closing old sessions and reconnecting to all devices..."))
     await asyncio.gather(*(close_device(device) for device in devices), return_exceptions=True)
     results = await asyncio.gather(*(connect_device(device) for device in devices), return_exceptions=True)
     connected: dict[str, Device] = {}
     for device, result in zip(devices, results):
         if isinstance(result, BaseException):
-            print(f"[{device.name}] Nadal niedostępny: {result}", file=sys.stderr)
+            print(tr(f"[{device.name}] Nadal niedostępny: {result}", f"[{device.name}] Still unavailable: {result}"), file=sys.stderr)
             await close_device(device)
         else:
             connected[device.name] = device
-            print(f"[{device.name}] Połączono ponownie: {device.username}@{device.host}:{device.port}")
-    print(f"Połączono ponownie z {len(connected)} z {len(devices)} urządzeń.")
+            print(tr(f"[{device.name}] Połączono ponownie: {device.username}@{device.host}:{device.port}", f"[{device.name}] Reconnected: {device.username}@{device.host}:{device.port}"))
+    print(tr(f"Połączono ponownie z {len(connected)} z {len(devices)} urządzeń.", f"Reconnected to {len(connected)} of {len(devices)} devices."))
     return connected
 
 
 def print_help() -> None:
-    print("""Polecenia konsoli:
+    print(tr("""Polecenia konsoli:
   /system identity print     wyślij polecenie API do wybranych urządzeń
   /ip address add address=192.0.2.1/24 interface=ether1
   /system package update check-for-updates once
@@ -457,29 +459,49 @@ Używaj składni polecenia RouterOS: ścieżka, akcja, a następnie argumenty.
 API nie udostępnia interaktywnego terminala; każde polecenie ma postać osobnej
 komendy API, a wynik przychodzi jako rekordy. Odpowiedzi są wypisywane na bieżąco.
 Przed instalacją aktualizacji lub resetem wybierz router poleceniem :only nazwa.
-""")
+""", """Console commands:
+  /system identity print     send an API command to selected devices
+  /ip address add address=192.0.2.1/24 interface=ether1
+  /system package update check-for-updates once
+  /system package update install  (installs an update and reboots the router)
+  /system routerboard upgrade     (updates RouterBOOT)
+  /system reboot                  (reboots the router)
+  /system/reset-configuration    (erases configuration and may disconnect the router)
+  :list                      show devices and current selection
+  :only name1,name2          set target devices
+  :all                       select all connected devices
+  :reconnect                 reconnect to all configured devices
+  Tab                        complete common IP, SYSTEM, TOOLS commands and device names
+  :help                      show this help
+  :quit                      exit and close API connections
+
+Use RouterOS command syntax: path, action, then arguments.
+The API does not provide an interactive terminal; each command is a separate
+API request and results arrive as records. Replies are displayed as they arrive.
+Before installing an update or resetting, select a router using :only name.
+"""))
 
 
 async def run(args: argparse.Namespace) -> int:
     devices, default_password_mode = read_config(args.config)
     shared_password: str | None = None
     if any(d.password_mode == "shared" for d in devices):
-        shared_password = getpass.getpass("Wspólne hasło API dla urządzeń: ")
+        shared_password = getpass.getpass(tr("Wspólne hasło API dla urządzeń: ", "Shared API password for devices: "))
     for device in devices:
         if device.password_mode == "individual":
-            device.password = getpass.getpass(f"Osobne hasło API dla {device.name} ({device.username}@{device.host}): ")
+            device.password = getpass.getpass(tr(f"Osobne hasło API dla {device.name} ({device.username}@{device.host}): ", f"Individual API password for {device.name} ({device.username}@{device.host}): "))
         else:
             device.password = shared_password
     results = await asyncio.gather(*(connect_device(d) for d in devices), return_exceptions=True)
     connected: dict[str, Device] = {}
     for device, result in zip(devices, results):
         if isinstance(result, BaseException):
-            print(f"[{device.name}] Błąd połączenia: {result}", file=sys.stderr)
+            print(tr(f"[{device.name}] Błąd połączenia: {result}", f"[{device.name}] Connection error: {result}"), file=sys.stderr)
             await close_device(device)
         else:
             connected[device.name] = device
-            mode = "API-SSL" if device.use_ssl else "API (bez TLS)"
-            print(f"[{device.name}] Połączono: {device.username}@{device.host}:{device.port} ({mode})")
+            mode = "API-SSL" if device.use_ssl else tr("API (bez TLS)", "API (without TLS)")
+            print(tr(f"[{device.name}] Połączono: {device.username}@{device.host}:{device.port} ({mode})", f"[{device.name}] Connected: {device.username}@{device.host}:{device.port} ({mode})"))
     if not connected:
         return 1
 
@@ -487,7 +509,7 @@ async def run(args: argparse.Namespace) -> int:
     output_queue: asyncio.Queue = asyncio.Queue()
     printer = asyncio.create_task(output_printer(output_queue))
     selected = set(connected)
-    print("Konsola MikroTik API gotowa. Wpisz :help, aby zobaczyć polecenia.")
+    print(tr("Konsola MikroTik API gotowa. Wpisz :help, aby zobaczyć polecenia.", "MikroTik API console ready. Type :help to see commands."))
     try:
         while True:
             targets = ",".join(sorted(selected))
@@ -504,34 +526,34 @@ async def run(args: argparse.Namespace) -> int:
                 print_help()
             elif stripped == ":list":
                 for name, device in connected.items():
-                    state = "połączono" if device.writer and not device.writer.is_closing() else "rozłączono"
-                    chosen = ", wybrane" if name in selected else ""
+                    state = tr("połączono", "connected") if device.writer and not device.writer.is_closing() else tr("rozłączono", "disconnected")
+                    chosen = tr(", wybrane", ", selected") if name in selected else ""
                     print(f"  {name}: {device.username}@{device.host}:{device.port} ({state}{chosen})")
             elif stripped == ":all":
                 selected = set(connected)
-                print("Wybrano wszystkie połączone urządzenia.")
+                print(tr("Wybrano wszystkie połączone urządzenia.", "Selected all connected devices."))
             elif stripped == ":reconnect":
                 connected = await reconnect_devices(devices)
                 selected = set(connected)
                 if not connected:
-                    print("Nie udało się połączyć z żadnym urządzeniem. Możesz spróbować ponownie poleceniem :reconnect.", file=sys.stderr)
+                    print(tr("Nie udało się połączyć z żadnym urządzeniem. Możesz spróbować ponownie poleceniem :reconnect.", "Could not connect to any device. You can try again using :reconnect."), file=sys.stderr)
             elif stripped.startswith(":only "):
                 requested = {part.strip() for part in stripped[6:].split(",") if part.strip()}
                 unknown = requested - connected.keys()
                 if unknown:
-                    print("Nieznane lub niepołączone urządzenia: " + ", ".join(sorted(unknown)))
+                    print(tr("Nieznane lub niepołączone urządzenia: ", "Unknown or disconnected devices: ") + ", ".join(sorted(unknown)))
                 elif not requested:
-                    print("Podaj co najmniej jedną nazwę urządzenia.")
+                    print(tr("Podaj co najmniej jedną nazwę urządzenia.", "Specify at least one device name."))
                 else:
                     selected = requested
-                    print("Wybrano: " + ", ".join(sorted(selected)))
+                    print(tr("Wybrano: ", "Selected: ") + ", ".join(sorted(selected)))
             elif stripped.startswith(":"):
-                print("Nieznane polecenie konsoli. Wpisz :help.")
+                print(tr("Nieznane polecenie konsoli. Wpisz :help.", "Unknown console command. Type :help."))
             else:
                 try:
                     command = parse_command(stripped)
                 except ValueError as exc:
-                    print(f"Błędne polecenie: {exc}", file=sys.stderr)
+                    print(tr(f"Błędne polecenie: {exc}", f"Invalid command: {exc}"), file=sys.stderr)
                     continue
                 # Start row numbering afresh for each command, independently per router.
                 for name in selected:
@@ -543,9 +565,9 @@ async def run(args: argparse.Namespace) -> int:
                 output_queue.put_nowait(("", "!command-end", {}))
                 for name, result in zip(target_names, results):
                     if isinstance(result, BaseException):
-                        print(f"[{name}] Błąd wykonania: {result}", file=sys.stderr)
+                        print(tr(f"[{name}] Błąd wykonania: {result}", f"[{name}] Execution error: {result}"), file=sys.stderr)
     except KeyboardInterrupt:
-        print("\nPrzerywam...")
+        print(tr("\nPrzerywam...", "\nInterrupting..."))
     finally:
         printer.cancel()
         await asyncio.gather(printer, return_exceptions=True)
@@ -554,8 +576,10 @@ async def run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Wspólna konsola API do wielu urządzeń MikroTik")
-    parser.add_argument("-c", "--config", type=Path, default=Path("devices.json"), help="plik JSON z listą urządzeń (domyślnie devices.json)")
+    configure_language()
+    parser = argparse.ArgumentParser(description=tr("Wspólna konsola API do wielu urządzeń MikroTik", "Shared API console for multiple MikroTik devices"))
+    add_language_argument(parser)
+    parser.add_argument("-c", "--config", type=Path, default=Path("devices.json"), help=tr("plik JSON z listą urządzeń (domyślnie devices.json)", "JSON file containing devices (default: devices.json)"))
     parser.add_argument("--password-prompt", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     try:

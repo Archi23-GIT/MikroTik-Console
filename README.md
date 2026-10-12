@@ -1,132 +1,174 @@
-# Wspólna konsola API MikroTik
+# MikroTik multi-device API console
 
-**Aktualna wersja: 1.3.5** (wartość z pliku `VERSION`).
+**English** | [Polski](README_PL.md)
 
-Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
+**Current version: 1.5.1** (recorded in `VERSION`).
 
-Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP. RouterOS API działa przez TCP/IP, dlatego urządzeń bez adresu IP nie można obsłużyć tą aplikacją.
+The console connects to multiple routers through the native RouterOS API. It keeps a separate API connection to each router, runs commands concurrently, and displays replies as records labeled with the device name.
 
-## Przykładowy ekran
+Each MikroTik must have a configured, reachable IPv4 or IPv6 address. The RouterOS API uses TCP/IP, so this application cannot manage devices without an IP address.
 
-![Przykład działania konsoli MikroTik API](docs/screenshots/mikrotik-console-example.png)
+## Example screen
 
-## Konfiguracja routerów
+![MikroTik API console example](docs/screenshots/mikrotik-console-example.png)
 
-Domyślna konfiguracja programu korzysta z nieszyfrowanego API na porcie TCP 8728. Na każdym routerze włącz usługę `api` i ogranicz dostęp do adresu komputera z aplikacją, na przykład:
+## Router configuration
+
+By default, the application uses unencrypted API connections on TCP port 8728. Enable the `api` service on each router and restrict access to the computer running the application, for example:
 
 ```routeros
 /ip service set api disabled=no address=192.168.88.10/32
 ```
 
-Ogranicz dostęp także regułami firewalla. Użyj konta RouterOS z uprawnieniem `api` i tylko tymi pozostałymi uprawnieniami, których wymagają wykonywane polecenia. **Nieszyfrowane API przesyła hasło i polecenia jawnym tekstem**, więc używaj go wyłącznie w zaufanej sieci lokalnej lub przez VPN. RouterOS domyślnie używa portów 8728 dla API i 8729 dla API-SSL ([dokumentacja MikroTik](https://help.mikrotik.com/docs/spaces/ROS/pages/47579160/API)).
+Also restrict access with firewall rules. Use a RouterOS account with the `api` permission and only the other permissions required by your commands. **Unencrypted API connections transmit passwords and commands in plain text**, so use them only on a trusted local network or through a VPN. RouterOS uses port 8728 for API and 8729 for API-SSL by default ([MikroTik documentation](https://help.mikrotik.com/docs/spaces/ROS/pages/47579160/API)).
 
-## Hasła
+## Passwords
 
-W `devices.json` wspólne ustawienia znajdują się w sekcji `defaults`; wpisy w `devices` zawierają zwykle tylko nazwę i adres routera. Ustawienia konkretnego urządzenia można nadpisać w jego wpisie. Tryb hasła ustaw w `defaults`:
+Shared settings in `devices.json` belong in `defaults`; entries in `devices` usually contain only a router name and address. Each device entry can override the shared settings. Set the password mode in `defaults`:
 
-- `"password_mode": "shared"` pyta raz o wspólne hasło dla routerów bez własnego ustawienia.
-- `"password_mode": "individual"` pyta osobno dla każdego takiego routera.
-- Wpis `"password_mode": "individual"` wewnątrz konkretnego urządzenia wymusza osobne hasło dla niego, nawet gdy trybem domyślnym jest `shared`.
+- `"password_mode": "shared"` prompts once for a shared password for devices without their own setting.
+- `"password_mode": "individual"` prompts separately for each such device.
+- `"password_mode": "individual"` in a device entry requires a separate password for that device, even when the default mode is `shared`.
 
-Hasła są pobierane przy uruchomieniu i nie są zapisywane do pliku. Zobacz [devices.example.json](devices.example.json).
+Passwords are requested at startup and are not saved to the configuration file. See [devices.example.json](devices.example.json).
 
-## Automatyczne wykrywanie urządzeń
+## Message language
 
-`mikrotik-config-builder.py` skanuje podsieć przez port API, loguje się do odpowiadających routerów i pobiera ich nazwy z `/system identity`. Do wykrycia urządzenia potrzebne jest dostępne API oraz poprawny wspólny login i hasło. Hasło jest pytane w terminalu i nie trafia do pliku.
+Both scripts automatically choose the language of messages, prompts, errors, and help. Polish is used when the detected system language is Polish. English is used for other languages and when detection fails.
+
+On macOS, detection reads the first language in `AppleLanguages`. On Windows, it reads the user's interface language. On Linux, it checks `LC_ALL`, `LANGUAGE`, `LC_MESSAGES`, and `LANG`, in that order. Keep the shared module `mikrotik_language.py` alongside both scripts. RouterOS replies and error messages originating from the operating system are displayed as received.
+
+Use `--lang pl` or `--lang en` to override detection in either program. The option also sets the language of `--help`. Without `--lang`, detection remains automatic.
+
+```sh
+python3 mikrotik-config-builder.py --ipv6 --lang en
+python3 mikrotik-console.py --lang pl
+```
+
+## Automatic device discovery
+
+`mikrotik-config-builder.py` scans a subnet on the API port, logs in to responding routers, and reads their names from `/system identity`. Discovery requires an accessible API and valid shared credentials. The password is requested in the terminal and is not saved.
 
 ```sh
 python3 mikrotik-config-builder.py --network 10.0.138.0/24
 ```
 
-Program domyślnie używa nieszyfrowanego API na porcie 8728 i zapisuje wynik do `devices.json`. Jeśli plik już istnieje, zapyta przed zastąpieniem. Można wskazać inną podsieć, port, użytkownika i plik wynikowy, np. `--network 10.0.137.0/24 --output nowa-siec.json`. Dla API-SSL użyj `--ssl --port 8729`; certyfikat jest weryfikowany domyślnie. `--insecure` wyłącza tę weryfikację i należy go używać tylko świadomie.
+By default, the builder uses unencrypted API on port 8728 and saves the result to `devices.json`. If the file exists, it asks before overwriting it. You can choose another subnet, port, username, or output file, for example `--network 10.0.137.0/24 --output new-network.json`. For API-SSL, use `--ssl --port 8729`; certificates are verified by default. `--insecure` disables verification.
 
-Nazwa urządzenia pochodzi z RouterOS Identity. Gdy kilka urządzeń ma taką samą nazwę, generator dodaje do nazwy końcówkę z ostatnim oktetem adresu IP.
+With `--ipv6` and no `--network`, the builder sends MNDP requests on UDP/5678 using IPv4 broadcasts (limited and directed broadcasts on each local interface) and IPv6 multicast. It waits 35 seconds to cover the default 30-second RouterOS announcement interval. It extracts IPv6 addresses from announcements and uses IPv4 addresses as temporary connections to read `/ip/neighbor/print`. It then tries the IPv6 addresses of neighbors visible to those routers, including devices whose announcements were not received directly by the computer. Temporary IPv4 addresses are excluded from `devices.json`; this mode saves IPv6 addresses.
 
-## Uruchomienie
+Discovery uses MNDP and RouterOS neighbor tables. It does not use the general macOS neighbor table, which can include unrelated devices and system interfaces. No subnet is required in automatic IPv6 mode. After discovery, the builder attempts API login. Failed addresses are reported individually.
+
+Link-local addresses (`fe80::`) work only on the link where they were discovered. The builder includes the computer's interface identifier in `host`, for example `fe80::2ec8:1bff:fe05:2a4e%en0`; the console uses it for IPv6 connections. Discovery covers the computer's local links and does not cross routers into other VLANs or subnets. Neighbor-table addresses are accepted only from MikroTik neighbor records returned by the routers.
+
+```sh
+python3 mikrotik-config-builder.py --ipv6
+```
+
+You can also scan a small, reachable IPv6 prefix explicitly:
+
+```sh
+python3 mikrotik-config-builder.py --ipv6 --network fd12:3456:789a::/120 --max-hosts 256
+```
+
+The scanner respects `--max-hosts` (default: 4096). A typical `/64` is too large to scan. The router's API service, `/ip service` access rules, and IPv6 firewall must allow connections from the scanning computer.
+
+A preparation message appears immediately, followed by a notice about waiting for MNDP announcements.
+
+Device names come from RouterOS Identity. For each identity, the builder saves only one working address: the first in IP address order. Other addresses with the same identity are skipped without adding an IP suffix to the name, so the console connects to that device once. Routers sharing an identity are treated as one device; give separate routers distinct identities.
+
+## Starting the console
+
+Copy the example configuration if you want to configure devices manually:
 
 ```sh
 cp devices.example.json devices.json
 ```
 
-`devices.example.json` zawiera przykładowe 28 urządzeń `S01R1`–`S14R2` z adresami `10.0.138.1`–`10.0.138.28` i wspólnymi ustawieniami w `defaults`. Przed użyciem dostosuj nazwy i adresy do swojej sieci, po czym uruchom:
+`devices.example.json` contains 28 example devices, `S01R1`–`S14R2`, at `10.0.138.1`–`10.0.138.28`, with shared settings in `defaults`. Adjust their names and addresses for your network, or generate `devices.json` with the builder, then run:
 
 ```sh
 python3 mikrotik-console.py
 ```
 
-## Parametry programów
+## Command-line options
 
 ### `mikrotik-console.py`
 
 ```sh
-python3 mikrotik-console.py [--config PLIK_JSON]
+python3 mikrotik-console.py [--config JSON_FILE] [--lang pl|en]
 ```
 
-| Parametr | Domyślna wartość | Opis |
+| Option | Default | Description |
 |---|---|---|
-| `-h`, `--help` | — | Wyświetla pomoc i kończy działanie. |
-| `-c PLIK_JSON`, `--config PLIK_JSON` | `devices.json` | Wskazuje plik konfiguracji urządzeń. |
-| `--password-prompt` | wyłączony | Ukryty, zgodnościowy przełącznik; hasła i tak są pobierane interaktywnie według `password_mode` w konfiguracji. |
+| `-h`, `--help` | — | Show help and exit. |
+| `--lang pl`, `--lang en` | Automatic detection | Force Polish or English messages and help. |
+| `-c JSON_FILE`, `--config JSON_FILE` | `devices.json` | Device configuration file. |
+| `--password-prompt` | Disabled | Hidden compatibility option; passwords are always requested interactively according to `password_mode`. |
 
-#### Pola pliku `devices.json`
+#### `devices.json` fields
 
-Konfiguracja zawiera sekcję `defaults` ze wspólnymi ustawieniami oraz tablicę `devices` z urządzeniami. Pola urządzenia mogą nadpisać odpowiadające im wartości domyślne.
+The configuration contains shared settings in `defaults` and a `devices` array. Device fields can override the corresponding defaults.
 
-| Pole | Domyślna wartość | Opis |
+| Field | Default | Description |
 |---|---|---|
-| `defaults` | `{}` | Wspólne ustawienia urządzeń; każde pole można nadpisać w konkretnym wpisie. |
-| `devices` | wymagane | Niepusta tablica urządzeń. |
-| `name` | wymagane | Nazwa urządzenia używana w konsoli; musi być unikalna. |
-| `host` | wymagane | Osiągalny adres IPv4 lub IPv6 routera. |
-| `username` | `admin` | Nazwa użytkownika API. |
-| `port` | `8728` bez TLS, `8729` z TLS | Port TCP API; jawnie podana wartość zastępuje port wynikający z `ssl`. |
-| `ssl` | `false` | `true` włącza API-SSL, `false` używa nieszyfrowanego API. |
-| `verify_ssl` | `true` | Weryfikuje certyfikat API-SSL. Ma znaczenie, gdy `ssl` jest włączone. |
-| `password_mode` | `shared` | `shared` pyta raz o wspólne hasło, a `individual` pyta osobno dla każdego urządzenia. Wpis urządzenia może nadpisać tryb z `defaults`. |
+| `defaults` | `{}` | Shared device settings; individual entries can override each field. |
+| `devices` | Required | Nonempty array of devices. |
+| `name` | Required | Device name used in the console; must be unique. |
+| `host` | Required | Reachable IPv4 or IPv6 address of the router. |
+| `username` | `admin` | API username. |
+| `port` | `8728` without TLS, `8729` with TLS | API TCP port; an explicit value overrides the port selected by `ssl`. |
+| `ssl` | `false` | `true` enables API-SSL; `false` uses unencrypted API. |
+| `verify_ssl` | `true` | Verify the API-SSL certificate. Applies when `ssl` is enabled. |
+| `password_mode` | `shared` | `shared` requests one shared password; `individual` requests a password for each device. A device entry can override `defaults`. |
 
-Starsze pliki mogą ustawiać `password_mode` na najwyższym poziomie JSON; nowe konfiguracje powinny umieszczać go w `defaults`.
+Older configurations may put `password_mode` at the top level of the JSON object. New configurations should put it in `defaults`.
 
 ### `mikrotik-config-builder.py`
 
 ```sh
-python3 mikrotik-config-builder.py [PARAMETRY]
+python3 mikrotik-config-builder.py [OPTIONS]
 ```
 
-| Parametr | Domyślna wartość | Opis |
+| Option | Default | Description |
 |---|---|---|
-| `-h`, `--help` | — | Wyświetla pomoc i kończy działanie. |
-| `--network CIDR` | `10.0.138.0/24` | Podsieć IPv4, którą skaner sprawdza pod kątem dostępności API. |
-| `--username NAZWA` | `admin` | Wspólna nazwa użytkownika API używana do logowania i zapisana w sekcji `defaults`. Hasło jest pytane w terminalu. |
-| `--port PORT` | `8728` | Port TCP API skanowanych routerów. Przy `--ssl` podaj port API-SSL, zwykle `8729`. |
-| `--ssl` | wyłączony | Używa API-SSL zamiast nieszyfrowanego API. |
-| `--insecure` | wyłączony | Wyłącza weryfikację certyfikatu; działa tylko z `--ssl`. |
-| `--timeout SEKUNDY` | `1.5` | Maksymalny czas próby połączenia z jednym adresem. |
-| `--workers LICZBA` | `48` | Maksymalna liczba równoległych prób połączenia. |
-| `--max-hosts LICZBA` | `4096` | Limit liczby adresów do sprawdzenia w podanej podsieci. |
-| `--output PLIK` | `devices.json` | Ścieżka pliku JSON, do którego zostanie zapisana konfiguracja. |
-| `--force` | wyłączony | Zastępuje istniejący plik wynikowy bez pytania. Bez tego przełącznika program pyta o zgodę w terminalu. |
+| `-h`, `--help` | — | Show help and exit. |
+| `--lang pl`, `--lang en` | Automatic detection | Force Polish or English messages and help. |
+| `--network CIDR` | `10.0.138.0/24` without `--ipv6`; none for automatic IPv6 discovery | Prefix to scan. With `--ipv6`, omitting this option enables active MNDP discovery. |
+| `--ipv6` | Disabled | Use IPv6. Without `--network`, send MNDP requests over IPv4 broadcast and IPv6 multicast, then supplement discovery from accessible routers' `/ip/neighbor` tables. With `--network`, scan that prefix. |
+| `--username NAME` | `admin` | Shared API username used for login and saved in `defaults`. The password is requested in the terminal. |
+| `--port PORT` | `8728` | API TCP port. With `--ssl`, specify the API-SSL port, usually `8729`. |
+| `--ssl` | Disabled | Use API-SSL instead of unencrypted API. |
+| `--insecure` | Disabled | Disable certificate verification; requires `--ssl`. |
+| `--timeout SECONDS` | `1.5` | Timeout for each connection or API reply. |
+| `--workers NUMBER` | `48` | Maximum number of concurrent connection attempts. |
+| `--max-hosts NUMBER` | `4096` | Maximum number of addresses to check. |
+| `--output FILE` | `devices.json` | Output JSON configuration path. |
+| `--force` | Disabled | Overwrite the output file without prompting. Otherwise, ask for confirmation in the terminal. |
 
-Przykład skanowania innej podsieci z API-SSL i zapisem do osobnego pliku:
+Example: scan another IPv4 subnet with API-SSL and save a separate configuration:
 
 ```sh
 python3 mikrotik-config-builder.py --network 192.168.88.0/24 --ssl --port 8729 --output routers.json
 ```
 
-## Obsługa konsoli
+## Using the console
 
-- Wpisz polecenie RouterOS, aby wysłać je równolegle do wybranych urządzeń, np. `/system identity print`.
-- Ścieżki można wpisać ze spacjami albo ukośnikami, np. `/system package update check-for-updates` lub `/system/package/update/check-for-updates`.
-- Tab podpowiada też aktualizację RouterOS: `/system package print`, sprawdzenie aktualizacji, pobranie, wybór kanału oraz instalację. `download` pokazuje zbiorczy postęp zamiast wypisywać każdy fragment pobierania. `install` pobiera i instaluje aktualizację, po czym router uruchamia się ponownie. Przed instalacją wybierz router przez `:only nazwa`, aby nie zrestartować wszystkich wybranych urządzeń naraz.
-- `:list` pokazuje urządzenia i ich stan.
-- `:only router-dom,router-biuro` wybiera urządzenia docelowe.
-- `:all` wybiera wszystkie połączone urządzenia.
-- `:reconnect` zamyka stare sesje i próbuje połączyć ponownie ze wszystkimi routerami z konfiguracji; niedostępne urządzenia można ponowić kolejnym `:reconnect`.
-- `/system reboot`, `/system routerboard upgrade` oraz `/system/reset-configuration` są podpowiadane przez Tab. Reset konfiguracji kasuje ustawienia routera i może zerwać połączenie; przed poleceniem wybierz pojedyncze urządzenie przez `:only nazwa`.
-- `Tab` podpowiada typowe ścieżki z głównych gałęzi IP, SYSTEM i TOOLS oraz komendy konsoli.
-- Tab podpowiada również `/system routerboard upgrade` do aktualizacji RouterBOOT, `/system reboot` do restartu oraz `/system/reset-configuration` do resetu konfiguracji. Po restarcie użyj `:reconnect`, aby ponownie połączyć się bez zamykania aplikacji.
-- Podpowiedzi `/tool romon print` i `/tool romon set enabled=yes` pokazują stan i włączają RoMON na wybranym urządzeniu.
-- `:help` pokazuje pomoc, a `:quit` zamyka połączenia.
+- Enter a RouterOS command to send it concurrently to selected devices, for example `/system identity print`.
+- Paths may use spaces or slashes: `/system package update check-for-updates` and `/system/package/update/check-for-updates` are both supported.
+- Tab completion includes RouterOS package commands for checking updates, downloading, selecting a channel, and installing. `download` displays combined progress instead of every download fragment. `install` downloads and installs an update, then reboots the router. Before installing, select a router using `:only name` to avoid rebooting all selected devices at once.
+- `:list` shows devices and their connection states.
+- `:only home-router,office-router` selects target devices.
+- `:all` selects all connected devices.
+- `:reconnect` closes old sessions and attempts to reconnect to all configured routers. Retry unavailable devices with another `:reconnect`.
+- Tab completion includes `/system reboot`, `/system routerboard upgrade`, and `/system/reset-configuration`. Resetting erases the router's configuration and may disconnect it; select a single device using `:only name` first.
+- Tab completes common paths under IP, SYSTEM, and TOOLS, console commands, and device names.
+- `/system routerboard upgrade` updates RouterBOOT. After rebooting, use `:reconnect` to connect again without restarting the application.
+- `/tool romon print` and `/tool romon set enabled=yes` show the RoMON state and enable RoMON on the selected device.
+- `:help` shows help; `:quit` closes connections and exits.
 
-Konsola przekazuje komendy do API bez zamkniętej listy RouterOS akcji, więc może obsługiwać komendy dostępne w danej wersji RouterOS i jej pakietach, o ile są dostępne przez API. Polecenia można podać jako ścieżkę CLI ze spacjami albo API ze znakami `/`; po `print` można użyć API query, np. `/ip/address/print ?address=192.168.99.1/24`. Typowe warunki CLI po `where` są tłumaczone na zapytania API. Każdy rekord mieści atrybuty w jednym wierszu, zawijanym do szerokości terminala. API nie jest terminalem tekstowym: nie przekazuje ANSI-owego paska postępu ani interaktywnych pytań. Podpowiadanie Tab korzysta z listy przykładowych poleceń w programie; nie pobiera dynamicznych podpowiedzi z routera.
+The console forwards API commands without restricting them to a fixed list of RouterOS actions. Commands available in the router's version and packages can be used if the API supports them. Enter a CLI path with spaces or an API path with `/` separators. After `print`, you can use an API query, for example `/ip/address/print ?address=192.168.99.1/24`. Common CLI conditions after `where` are converted to API queries. Each record displays its attributes on one line, wrapping to fit the terminal width.
 
-Tylko końcowe statusy polecenia `/system package update check-for-updates` są kolorowane w terminalu: „System is already up to date” na zielono, inne końcowe statusy na czerwono. Status pośredni „finding out latest version...” oraz odpowiedzi pozostałych komend pozostają w domyślnym kolorze terminala. Kolory są wyłączone przy przekierowaniu wyjścia oraz po ustawieniu `NO_COLOR`.
+The API is not a text terminal: it does not relay ANSI progress bars or interactive prompts. Tab completion uses example commands built into the program and does not retrieve dynamic suggestions from the router.
+
+Only final statuses of `/system package update check-for-updates` are colored: “System is already up to date” is green; other final statuses are red. The intermediate “finding out latest version...” status and other command replies use the terminal's default color. Colors are disabled when output is redirected or `NO_COLOR` is set.
