@@ -2,11 +2,20 @@
 
 [English](README.md) | **Polski**
 
-**Aktualna wersja: 1.6.0** (wartość z pliku `VERSION`).
+**Aktualna wersja: 1.6.1** (wartość z pliku `VERSION`).
 
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
 Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP — IPv4 albo IPv6. RouterOS API działa przez TCP/IP, dlatego urządzeń bez adresu IP nie można obsłużyć tą aplikacją.
+
+## Informacje o projekcie
+
+- Język implementacji: **Python**; odczyt interfejsów Windows wywołuje również PowerShell.
+- Języki dokumentacji i komunikatów aplikacji: angielski i polski.
+- Licencja: **GNU GPL v3**, zgodnie z plikiem [LICENSE](LICENSE).
+- Zależności: biblioteka standardowa dla podstawowych funkcji; opcjonalne podpowiedzi Tab na Windows korzystają z `pyreadline3`. Instalacja na Windows: `py -m pip install -r requirements.txt`.
+- Testy automatyczne: GitHub Actions uruchamia testy jednostkowe na Linux, Windows i macOS z Pythonem 3.12 i 3.14. Jest to skonfigurowana macierz testów, a nie potwierdzenie działania w rzeczywistej sieci routerów.
+- Współpraca: [CONTRIBUTING.md](CONTRIBUTING.md). Zgłaszanie problemów bezpieczeństwa: [SECURITY.md](SECURITY.md).
 
 ## Wymagania dotyczące Pythona i systemu operacyjnego
 
@@ -251,3 +260,57 @@ python3 mikrotik-config-builder.py --network 192.168.88.0/24 --ssl --port 8729 -
 Konsola przekazuje komendy do API bez zamkniętej listy RouterOS akcji, więc może obsługiwać komendy dostępne w danej wersji RouterOS i jej pakietach, o ile są dostępne przez API. Polecenia można podać jako ścieżkę CLI ze spacjami albo API ze znakami `/`; po `print` można użyć API query, np. `/ip/address/print ?address=192.168.99.1/24`. Typowe warunki CLI po `where` są tłumaczone na zapytania API. Każdy rekord mieści atrybuty w jednym wierszu, zawijanym do szerokości terminala. API nie jest terminalem tekstowym: nie przekazuje ANSI-owego paska postępu ani interaktywnych pytań. Podpowiadanie Tab korzysta z listy przykładowych poleceń w programie; nie pobiera dynamicznych podpowiedzi z routera.
 
 Tylko końcowe statusy polecenia `/system package update check-for-updates` są kolorowane w terminalu: „System is already up to date” na zielono, inne końcowe statusy na czerwono. Status pośredni „finding out latest version...” oraz odpowiedzi pozostałych komend pozostają w domyślnym kolorze terminala. Kolory są wyłączone przy przekierowaniu wyjścia oraz po ustawieniu `NO_COLOR`.
+
+## Techniczne aspekty działania
+
+### Komponenty i kolejność działania
+
+| Komponent | Odpowiedzialność |
+|---|---|
+| `mikrotik-config-builder.py` | Wykrywanie adresów, sprawdzanie dostępu API, odczyt nazw RouterOS i generowanie `devices.json`. |
+| `mikrotik-console.py` | Odczyt konfiguracji, utrzymywanie sesji TCP dla urządzeń, tłumaczenie poleceń i prezentacja odpowiedzi. |
+| `mikrotik_language.py` | Wykrywanie języka systemu i zastosowanie `--lang pl/en` przed przygotowaniem pomocy. |
+
+Generator jest osobnym etapem przygotowania. Konsola odczytuje zapisany plik i nie uruchamia automatycznie wykrywania. Oba programy korzystają z `asyncio` do operacji sieciowych. Odczyt poleceń konsoli używa `asyncio.to_thread(input, ...)`, aby nie blokować pętli zdarzeń. Zbieranie MNDP i odczyt interfejsów w generatorze są synchroniczne i kończą się przed skanowaniem API.
+
+### Transport RouterOS API
+
+Skrypty implementują protokół RouterOS API bez zewnętrznej biblioteki klienta. Żądanie jest zdaniem złożonym ze słów UTF-8. Każde słowo poprzedza długość w bajtach, kodowana w jednym do pięciu bajtów; słowo o zerowej długości kończy zdanie. Logowanie wysyła `/login` z atrybutami `=name=` i `=password=`. Nie zaimplementowano starszego mechanizmu logowania challenge-response.
+
+Typy odpowiedzi obejmują `!re` (rekord), `!done` (zakończenie), `!trap` (błąd polecenia) i `!fatal` (błąd krytyczny). Atrybuty są odczytywane ze słów `=key=value`. Po `!trap` konsola odczytuje zakończenie, aby zachować synchronizację strumienia; powtarzające się komunikaty błędów łączy przy wyświetlaniu. TCP łączy się bezpośrednio ze wskazanym adresem IPv4/IPv6. TLS korzysta z modułu `ssl`; weryfikacja certyfikatu jest włączona, jeśli nie została jawnie wyłączona.
+
+### Wykrywanie i sprawdzanie adresów
+
+1. Przy jawnym `--network` generator wylicza adresy hostów z prefiksu CIDR. Przed wyliczeniem sprawdza liczbę adresów względem `--max-hosts`. Prefiks `/128` z zakresem, np. `fe80::4aa9:8aff:feb7:5699%12/128`, sprawdza jeden adres IPv6 bez MNDP.
+2. Automatyczne `--ipv6` zbiera ogłoszenia MNDP i wysyła żądania odświeżenia przez UDP/5678. Etap IPv6 dołącza do `ff02::1` na lokalnych interfejsach, czeka 35 sekund i ponawia żądania. Etap IPv4 wysyła broadcast ogólny i skierowany na każdym wykrytym interfejsie IPv4.
+3. Parser MNDP odczytuje czterobajtowy nagłówek i pola typu/długości/wartości w kolejności big-endian. Wymaga pola adresu MAC i odczytuje pola adresów IPv4/IPv6. Nie skanuje ogólnej pamięci sąsiadów ARP/NDP systemu.
+4. Gdy Windows nie otrzyma żadnych adresów przez MNDP, generator odczytuje lokalne prefiksy IPv4 przez PowerShell i używa ich do wstępnych połączeń API. Zbyt duże prefiksy są pomijane. Ta ścieżka nie uruchamia się tylko dlatego, że część adresów znalezionych przez MNDP później nie odpowiada przez API.
+5. Każdy adres przechodzi połączenie TCP, logowanie API i odczyt `/system/identity/print`. W trybie automatycznym `/ip/neighbor/print` może dostarczyć kolejnych adresów IPv6. Dla wstępnych połączeń IPv4 ze znanym interfejsem lokalnym `/ipv6/address/print` dostarcza także własnych, włączonych i poprawnych adresów IPv6 routera. Przed zapisem te adresy są osobno sprawdzane przez API.
+
+Adresy link-local IPv6 zachowują zakres interfejsu komputera: np. `%en7` na macOS lub `%12` na Windows. Nazwa interfejsu RouterOS nie zastępuje zakresu komputera. Takie adresy w `devices.json` są właściwe dla konkretnego komputera; przeniesienie pliku może wymagać zmiany zakresów.
+
+Generator zapamiętuje sprawdzone adresy pomiędzy rundami wykrywania. Semafor ogranicza liczbę równoczesnych prób przez `--workers` (domyślnie 48). `--timeout` (domyślnie 1,5 sekundy) obowiązuje osobno dla połączenia i etapów odbioru odpowiedzi, a nie dla całego skanowania. `--max-hosts` (domyślnie 4096) ogranicza łączną liczbę sprawdzanych adresów, w tym wstępnych IPv4 i późniejszych IPv6; osiągnięcie limitu może zatrzymać dalsze wykrywanie.
+
+### Zapis konfiguracji i duplikaty
+
+Do wyniku kwalifikują się tylko poprawne odpowiedzi API. Automatyczny tryb IPv6 wyklucza tymczasowe adresy IPv4. Wyniki są sortowane według adresu i zakresu; generator zachowuje pierwszy działający adres dla każdej dokładnej nazwy RouterOS Identity, z uwzględnieniem wielkości liter. Kluczem deduplikacji jest nazwa, a nie MAC czy numer seryjny: osobne routery z taką samą nazwą są traktowane jako jedno urządzenie.
+
+Generator zapisuje JSON do sąsiedniego pliku `.tmp`, a po zapisie zastępuje plik docelowy. Chroni to przed zastąpieniem konfiguracji częściowo zapisanym JSON-em, ale nie gwarantuje trwałości przy utracie zasilania. Jeśli nie znaleziono urządzeń kwalifikujących się do zapisu, poprzednia konfiguracja pozostaje zachowana. Hasła pozostają w pamięci procesu i nie trafiają do JSON. Błędy IPv4 są podsumowywane; błędy IPv6 są wyświetlane osobno dla każdego adresu.
+
+### Współbieżność konsoli i obsługa poleceń
+
+Konsola łączy się równolegle z urządzeniami i utrzymuje osobne obiekty odczytu, zapisu oraz `asyncio.Lock` dla każdego routera. Polecenia dla wybranych urządzeń wykonuje przez `asyncio.gather`; blokada danego urządzenia zapobiega mieszaniu odpowiedzi różnych poleceń w jednej sesji. Odpowiedzi trafiają do `asyncio.Queue`, a osobne zadanie drukuje je na bieżąco. Nie ma transakcji obejmującej wiele routerów ani wycofywania zmian: jedno urządzenie może wykonać polecenie, gdy inne zgłosi błąd.
+
+Połączenie i logowanie mają osobne limity 12 sekund. W czasie wykonywania polecenia limit 120 sekund obowiązuje dla każdego zdania odpowiedzi; nie jest to limit całkowitego czasu polecenia. `:reconnect` zamyka poprzednie sesje i ponawia połączenia ze wszystkimi urządzeniami konfiguracji. Ponowienie wymaga polecenia użytkownika i nie działa w automatycznej pętli.
+
+Parser używa `shlex` do obsługi cudzysłowów, zamienia ścieżki i akcje CLI na słowa API, zachowuje jawne zapytania API i obsługuje wybrane warunki CLI `where`. Nie emuluje całej interaktywnej powłoki RouterOS ani dowolnej składni skryptów RouterOS. Tab korzysta ze statycznej listy poleceń i nazw urządzeń. Moduł `readline` zapewnia edycję wiersza; na Windows jego zamiennikiem jest `pyreadline3`. Bez tego modułu można nadal wpisywać polecenia.
+
+### Weryfikacja i ograniczenia
+
+Testy regresji można uruchomić bez routerów:
+
+```sh
+python3 -m unittest test_config_builder test_language test_console_portability
+```
+
+Na Windows użyj `py -m unittest` z tymi samymi nazwami modułów. Testy obejmują zapis konfiguracji, deduplikację nazw, język, brak `readline`, dane interfejsów Windows i symulowane wykrywanie IPv6 przez API IPv4. Testy z atrapami nie potwierdzają działania w rzeczywistej sieci Windows/Linux. Odbiór MNDP zależy od lokalnego połączenia i filtracji; osiągalny adres API IPv6 może nie pojawić się w wykrywaniu. Odczyt interfejsów dla MNDP IPv4 na Linux nadal wymaga dostosowania z formatu `ifconfig` macOS.

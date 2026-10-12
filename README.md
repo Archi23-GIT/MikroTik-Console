@@ -2,11 +2,20 @@
 
 **English** | [Polski](README_PL.md)
 
-**Current version: 1.6.0** (recorded in `VERSION`).
+**Current version: 1.6.1** (recorded in `VERSION`).
 
 The console connects to multiple routers through the native RouterOS API. It keeps a separate API connection to each router, runs commands concurrently, and displays replies as records labeled with the device name.
 
 Each MikroTik must have a configured, reachable IPv4 or IPv6 address. The RouterOS API uses TCP/IP, so this application cannot manage devices without an IP address.
+
+## Project information
+
+- Implementation language: **Python**; Windows interface enumeration also invokes PowerShell.
+- Documentation languages: English and Polish. Application messages: English and Polish.
+- License: **GNU GPL v3**, as provided in [LICENSE](LICENSE).
+- Dependencies: standard library for the core; optional Windows Tab completion uses `pyreadline3`. Install with `py -m pip install -r requirements.txt` on Windows.
+- Automated checks: GitHub Actions runs unit tests on Linux, Windows, and macOS with Python 3.12 and 3.14. This is a configured test matrix, not proof of live router/network compatibility.
+- Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
 
 ## Python and operating system requirements
 
@@ -257,3 +266,57 @@ The console forwards API commands without restricting them to a fixed list of Ro
 The API is not a text terminal: it does not relay ANSI progress bars or interactive prompts. Tab completion uses example commands built into the program and does not retrieve dynamic suggestions from the router.
 
 Only final statuses of `/system package update check-for-updates` are colored: “System is already up to date” is green; other final statuses are red. The intermediate “finding out latest version...” status and other command replies use the terminal's default color. Colors are disabled when output is redirected or `NO_COLOR` is set.
+
+## Technical implementation
+
+### Components and execution flow
+
+| Component | Responsibility |
+|---|---|
+| `mikrotik-config-builder.py` | Discover candidate addresses, verify API credentials, read RouterOS identities, and generate `devices.json`. |
+| `mikrotik-console.py` | Load configuration, maintain per-device TCP sessions, translate commands, and display replies. |
+| `mikrotik_language.py` | Detect the OS language and apply the `--lang pl/en` override before building CLI help. |
+
+The builder is a separate preparation step. The console reads the saved configuration; it does not run discovery automatically. Both programs use `asyncio` for network operations. Terminal input in the console runs through `asyncio.to_thread(input, ...)` so it does not block the event loop. MNDP collection and interface enumeration in the builder are synchronous and finish before API scanning begins.
+
+### RouterOS API transport
+
+The scripts implement RouterOS API framing directly, without an external API client. A request is a sentence of UTF-8 words. Each word has a variable-length byte-count prefix (one to five bytes); a zero-length word ends the sentence. Login uses `/login` with `=name=` and `=password=` attributes. This implementation does not include the legacy challenge-response login mechanism.
+
+Reply types include `!re` (record), `!done` (completion), `!trap` (command error), and `!fatal` (fatal error). Attributes are decoded from `=key=value` words. The console consumes the completion after a trap to keep the stream aligned; it combines duplicate trap messages for display. TCP connects directly to the configured IPv4/IPv6 endpoint. TLS uses Python's `ssl` module; certificate verification is enabled unless explicitly disabled.
+
+### Discovery and validation
+
+1. With an explicit `--network`, the builder enumerates usable hosts in that CIDR. It checks the host count against `--max-hosts` before enumeration. A scoped `/128`, such as `fe80::4aa9:8aff:feb7:5699%12/128`, checks one IPv6 endpoint without MNDP.
+2. Automatic `--ipv6` first listens for MNDP and sends refresh requests on UDP/5678. IPv6 discovery joins `ff02::1` on local interfaces, waits 35 seconds, and repeats refresh requests. IPv4 discovery sends limited and directed broadcasts on each enumerated IPv4 interface.
+3. MNDP packets are parsed as a four-byte header followed by big-endian type/length/value fields. The parser requires a MAC-address field and extracts IPv4/IPv6 address fields. It is not a general ARP/NDP cache scan.
+4. If Windows receives no MNDP candidate addresses, the builder uses local IPv4 prefixes obtained through PowerShell as API bootstrap candidates. Oversized prefixes are skipped. This fallback is not triggered merely because some MNDP candidates later fail API checks.
+5. Each candidate is verified by TCP connection, API login, and `/system/identity/print`. In automatic mode, `/ip/neighbor/print` can add IPv6 candidates. For IPv4 bootstrap connections with a known local interface, `/ipv6/address/print` also supplies the router's own enabled, valid IPv6 addresses. These candidates undergo their own API checks before they can be saved.
+
+Link-local IPv6 candidates retain the computer's local interface scope: a name such as `%en7` on macOS or a numeric index such as `%12` on Windows. A RouterOS interface name cannot substitute for the computer's scope. Scoped addresses in `devices.json` are specific to that computer; moving the file may require updating scopes.
+
+The builder tracks attempted addresses across discovery rounds. Its semaphore limits concurrent checks to `--workers` (default 48). `--timeout` (default 1.5 seconds) applies separately to connection and reply stages, rather than to the whole scan. `--max-hosts` (default 4096) caps attempted addresses, including bootstrap and subsequent IPv6 candidates; reaching it can stop further expansion.
+
+### Configuration output and duplicate handling
+
+Only successful API results are eligible for output. Automatic IPv6 mode excludes temporary IPv4 bootstrap addresses. Results are sorted by address and scope; the first successful address for each exact, case-sensitive RouterOS identity is retained. Identity is the deduplication key, not MAC address or hardware serial number: two distinct routers with the same identity are treated as one.
+
+The builder writes JSON to a sibling `.tmp` file and replaces the destination after writing. This avoids replacing the destination with a partially written JSON document, but is not a power-loss durability guarantee. If no eligible devices are found, the existing configuration is preserved. Passwords are kept in process memory and are not written to JSON. IPv4 failures are summarized; IPv6 failures retain per-address details.
+
+### Console concurrency and command handling
+
+The console connects to configured devices concurrently and maintains one reader, writer, and `asyncio.Lock` per device. Commands run across selected devices with `asyncio.gather`; the per-device lock prevents replies from different commands being mixed on one connection. Replies enter an `asyncio.Queue` and a separate printer task displays them as they arrive. There is no cross-router transaction or rollback: one router can succeed while another fails.
+
+Connection and login each have a 12-second timeout. During command execution, each reply sentence has a 120-second timeout; this is not a 120-second total command limit. `:reconnect` explicitly closes old sessions and retries all configured devices. Reconnection is user-triggered, not an automatic retry loop.
+
+The parser uses `shlex` for quoting, converts CLI paths/actions into API words, preserves explicit API query words, and supports selected CLI `where` conditions. It does not emulate the full interactive RouterOS shell or arbitrary RouterOS scripting syntax. Tab completion comes from a static list plus configured device names. `readline` supplies line editing on supported systems; Windows can use `pyreadline3`. Without that module, ordinary command input remains available.
+
+### Verification and known limits
+
+Run the local regression suite without routers:
+
+```sh
+python3 -m unittest test_config_builder test_language test_console_portability
+```
+
+On Windows, use `py -m unittest` with the same module names. Tests cover configuration output, identity deduplication, language selection, missing `readline`, Windows interface data, and simulated IPv4-to-IPv6 discovery. Mock-based tests do not establish live Windows/Linux network compatibility. MNDP delivery depends on local-link connectivity and filtering; a reachable IPv6 API endpoint can still be absent from discovery. Linux's IPv4 MNDP interface enumeration still needs porting from macOS `ifconfig` output.

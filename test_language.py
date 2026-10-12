@@ -107,7 +107,8 @@ class LanguageTests(unittest.TestCase):
         script = self.load_script("mikrotik-config-builder.py")
         with patch.object(language, "LANGUAGE", "pl"), \
                 patch.object(sys, "argv", ["mikrotik-config-builder.py", "--ipv6", "--lang", "en"]), \
-                patch.object(script, "discover_ipv6_neighbors", return_value={}):
+                patch.object(script, "discover_ipv6_neighbors", return_value={}), \
+                patch.object(script, "windows_ipv4_bootstrap_hosts", return_value={}):
             output = io.StringIO()
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 self.assertEqual(script.main(), 1)
