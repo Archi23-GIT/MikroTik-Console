@@ -2,7 +2,7 @@
 
 **English** | [Polski](README_PL.md)
 
-**Current version: 1.5.5** (recorded in `VERSION`).
+**Current version: 1.6.0** (recorded in `VERSION`).
 
 The console connects to multiple routers through the native RouterOS API. It keeps a separate API connection to each router, runs commands concurrently, and displays replies as records labeled with the device name.
 
@@ -55,6 +55,8 @@ py -3 .\mikrotik-console.py --lang en
 Do not treat WSL as equivalent to native Windows for local-link MNDP discovery; its network setup must be checked separately.
 
 ### Windows IPv6 discovery
+
+Since 1.6.0, if MNDP returns no addresses on Windows, the builder checks API endpoints in local IPv4 subnets, within `--max-hosts`. After login, it reads `/ipv6/address/print` and `/ip/neighbor/print`, then verifies the IPv6 endpoints through API before saving them. IPv4 bootstrap addresses are not saved in IPv6 mode. This requires API read permissions and reachable IPv6 API endpoints. Large local subnets exceeding the remaining limit are skipped with a message. A local IPv6 address on the PC does not prove that MNDP packets are being received.
 
 Since 1.5.5, automatic discovery reads IPv4 broadcast interfaces using PowerShell and uses numeric IPv6 scope IDs on Windows (for example `fe80::1%12`). This has been tested with simulated interface data, not on a Windows network. If discovery returns no addresses, check IPv6 on the active adapter, local network connectivity, MNDP on the routers, and Windows Firewall permissions for Python to receive UDP/5678 on the trusted local network. Close WinBox and retry if it is using the discovery port. You can bypass MNDP using `--ipv6 --network` with a small reachable prefix. A missing discovery reply does not establish that the router API is unavailable.
 

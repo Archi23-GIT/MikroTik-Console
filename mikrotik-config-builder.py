@@ -247,7 +247,7 @@ def discover_mndp_ipv6(wait_seconds: float = 35.0) -> list[str]:
     return sorted(found, key=_address_sort_key)
 
 
-def _windows_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
+def _windows_ipv4_networks() -> list[tuple[str, str, str]]:
     """Read local IPv4 networks and matching IPv6 scope indices using PowerShell."""
     command = (
         "$ErrorActionPreference='Stop'; "
@@ -275,12 +275,17 @@ def _windows_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
             scope = str(record.get("Scope") or "")
             if address.is_loopback or address.is_link_local or address.is_unspecified or network.prefixlen >= 31:
                 continue
-            interfaces.append((scope, str(address), str(network.broadcast_address)))
+            interfaces.append((scope, str(address), str(network)))
         return interfaces
     except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError) as exc:
         print(tr(f"Nie można odczytać interfejsów Windows dla MNDP IPv4: {exc}",
                  f"Cannot read Windows interfaces for IPv4 MNDP: {exc}"), file=sys.stderr)
         return []
+
+
+def _windows_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
+    return [(scope, address, str(ipaddress.IPv4Network(network).broadcast_address))
+            for scope, address, network in _windows_ipv4_networks()]
 
 
 def _local_ipv4_broadcast_interfaces() -> list[tuple[str, str, str]]:
@@ -379,6 +384,26 @@ def discover_ipv6_neighbors() -> dict[str, str]:
     return dict(sorted(found.items(), key=lambda item: _address_sort_key(item[0])))
 
 
+def windows_ipv4_bootstrap_hosts(max_hosts: int) -> dict[str, str]:
+    """Bounded local IPv4 API scan when Windows receives no MNDP announcements."""
+    hosts: dict[str, str] = {}
+    interfaces = _windows_ipv4_networks()
+    local_addresses = {address for _, address, _ in interfaces}
+    for scope, address, prefix in interfaces:
+        if not scope:
+            continue
+        network = ipaddress.IPv4Network(prefix)
+        count = network.num_addresses - 2
+        if count > max_hosts - len(hosts):
+            print(tr(f"Pominięto podsieć {network}: przekracza limit --max-hosts dla wykrywania przez IPv4.",
+                     f"Skipped subnet {network}: it exceeds the --max-hosts limit for IPv4 discovery."), file=sys.stderr)
+            continue
+        for host in network.hosts():
+            if str(host) not in local_addresses:
+                hosts.setdefault(str(host), scope)
+    return hosts
+
+
 async def discover_one(address: str, args: argparse.Namespace, password: str,
                        semaphore: asyncio.Semaphore, tls_context: ssl.SSLContext | None,
                        read_neighbors: bool = False, known_identity: str = "",
@@ -417,6 +442,17 @@ async def discover_one(address: str, args: argparse.Namespace, password: str,
                         neighbor_hosts = neighbor_ipv6_candidates(neighbor_reply, address, local_interface)
                 except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
                     pass
+                if ":" not in address and local_interface:
+                    try:
+                        await write_sentence(writer, ["/ipv6/address/print"])
+                        own_reply = await asyncio.wait_for(read_command_reply(reader), timeout=args.timeout)
+                        if not any(kind in ("!trap", "!fatal") for kind, _ in own_reply):
+                            enabled = [(kind, fields) for kind, fields in own_reply
+                                       if fields.get("disabled") != "true" and fields.get("invalid") != "true"]
+                            for host in neighbor_ipv6_candidates(enabled, address, local_interface):
+                                neighbor_hosts.setdefault(host, identity)
+                    except (asyncio.TimeoutError, OSError, asyncio.IncompleteReadError):
+                        pass
             error = "" if identity else tr(f"{known_identity + ': ' if known_identity else ''}API nie zwróciło nazwy identity", f"{known_identity + ': ' if known_identity else ''}the API did not return an identity name")
             return address, identity, error, neighbor_hosts
         except asyncio.TimeoutError:
@@ -454,6 +490,10 @@ async def run(args: argparse.Namespace) -> int:
     if automatic_ipv6:
         print(tr("Wykrywanie MNDP: oczekiwanie na ogłoszenia IPv6 (35 sekund), następnie sprawdzanie interfejsów IPv4...", "MNDP discovery: waiting for IPv6 announcements (35 seconds), then checking IPv4 interfaces..."), flush=True)
         hosts = discover_ipv6_neighbors()
+        if not hosts and sys.platform == "win32":
+            print(tr("Brak odpowiedzi MNDP. Sprawdzam API w lokalnych podsieciach IPv4, aby odczytać adresy IPv6 routerów...",
+                     "No MNDP replies. Checking API on local IPv4 subnets to read router IPv6 addresses..."), flush=True)
+            hosts = windows_ipv4_bootstrap_hosts(args.max_hosts)
         if not hosts:
             print(tr("Nie wykryto adresów IPv6 w ogłoszeniach MNDP. Sprawdź, czy MNDP jest włączone na routerach i czy komputer jest w tym samym segmencie sieci.", "No IPv6 addresses found in MNDP announcements. Check that MNDP is enabled on the routers and that the computer is on the same network segment."), file=sys.stderr)
             return 1

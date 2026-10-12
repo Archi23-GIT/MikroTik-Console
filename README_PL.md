@@ -2,7 +2,7 @@
 
 [English](README.md) | **Polski**
 
-**Aktualna wersja: 1.5.5** (wartość z pliku `VERSION`).
+**Aktualna wersja: 1.6.0** (wartość z pliku `VERSION`).
 
 Program łączy się równolegle z wieloma routerami przez natywne RouterOS API. Utrzymuje osobne połączenie API do każdego routera, wykonuje polecenia równolegle i pokazuje odpowiedzi jako rekordy oznaczone nazwą urządzenia.
 
@@ -55,6 +55,8 @@ py -3 .\mikrotik-console.py --lang pl
 WSL nie jest równoważny natywnemu Windows przy wykrywaniu MNDP w lokalnym segmencie; jego konfigurację sieci trzeba sprawdzić osobno.
 
 ### Wykrywanie IPv6 na Windows
+
+Od 1.6.0, jeśli MNDP nie zwróci żadnych adresów na Windows, generator sprawdza API w lokalnych podsieciach IPv4, z uwzględnieniem `--max-hosts`. Po zalogowaniu odczytuje `/ipv6/address/print` i `/ip/neighbor/print`, a następnie sprawdza połączenie API z adresami IPv6 przed zapisaniem ich do konfiguracji. Tymczasowe adresy IPv4 nie trafiają do wyniku trybu IPv6. Wymaga to uprawnień do odczytu przez API oraz osiągalnych adresów API IPv6. Duże podsieci przekraczające pozostały limit są pomijane z komunikatem. Lokalny adres IPv6 komputera nie potwierdza odbioru pakietów MNDP.
 
 Od 1.5.5 automatyczne wykrywanie odczytuje interfejsy IPv4 broadcast przez PowerShell i używa liczbowych identyfikatorów zakresu IPv6 na Windows (np. `fe80::1%12`). Sprawdzono to na symulowanych danych interfejsów, a nie w sieci Windows. Jeśli wykrywanie nie zwraca adresów, sprawdź IPv6 na aktywnej karcie, połączenie z lokalnym segmentem, MNDP na routerach oraz zgodę Zapory Windows na odbiór przez Python ruchu UDP/5678 w zaufanej sieci lokalnej. Jeśli WinBox korzysta z portu wykrywania, zamknij go i ponów próbę. MNDP można ominąć, podając `--ipv6 --network` z małym, osiągalnym prefiksem. Brak odpowiedzi MNDP nie oznacza, że API routera jest niedostępne.
 

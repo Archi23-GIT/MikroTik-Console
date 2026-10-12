@@ -1,5 +1,7 @@
 # Backups and versioning
 
+Until the user explicitly changes this policy, keep releases in the `1.6.x` series. Increment only the patch number for subsequent changes, including new features (for example, `1.6.0` → `1.6.1`). Do not move to `1.7` or `2.0`. This overrides the general minor-version rule below.
+
 The current application version is recorded in `VERSION`. Before changing application code, runtime configuration, or behavior in a later task, create an immutable snapshot under `backup/` using this pattern:
 
 ```text

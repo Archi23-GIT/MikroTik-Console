@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import mikrotik_language
 
@@ -21,6 +21,58 @@ spec.loader.exec_module(builder)
 
 
 class BuilderTests(unittest.TestCase):
+    def test_ipv4_api_reads_own_ipv6_addresses(self):
+        args = argparse.Namespace(port=8728, timeout=1, username="admin")
+        writer = MagicMock()
+        writer.wait_closed = AsyncMock()
+        replies = [
+            [("!done", {})],
+            [("!re", {"name": "Glowny"}), ("!done", {})],
+            [("!done", {})],
+            [("!re", {"address": "fe80::1/64"}),
+             ("!re", {"address": "fe80::2/64", "disabled": "true"}), ("!done", {})],
+        ]
+        with patch.object(builder.asyncio, "open_connection", AsyncMock(return_value=(object(), writer))), \
+                patch.object(builder, "write_sentence", AsyncMock()) as write, \
+                patch.object(builder, "read_command_reply", AsyncMock(side_effect=replies)):
+            result = asyncio.run(builder.discover_one(
+                "192.168.99.1", args, "test", asyncio.Semaphore(1), None,
+                read_neighbors=True, local_interface="12",
+            ))
+        self.assertEqual(result[3], {"fe80::1%12": "Glowny"})
+        self.assertEqual(write.call_args.args[1], ["/ipv6/address/print"])
+
+    def test_windows_bootstrap_respects_prefix_scope_and_limit(self):
+        with patch.object(builder, "_windows_ipv4_networks", return_value=[
+                ("12", "192.168.99.183", "192.168.99.0/24")]):
+            hosts = builder.windows_ipv4_bootstrap_hosts(4096)
+            self.assertEqual(len(hosts), 253)
+            self.assertEqual(hosts["192.168.99.1"], "12")
+            self.assertNotIn("192.168.99.183", hosts)
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(builder.windows_ipv4_bootstrap_hosts(20), {})
+
+    def test_windows_no_mndp_uses_ipv4_then_saves_only_verified_ipv6(self):
+        async def discover(address, *args, **kwargs):
+            if address == "192.168.99.1":
+                self.assertEqual(kwargs["local_interface"], "12")
+                return address, "Glowny", "", {"fe80::1%12": "Glowny"}
+            return address, "Glowny", "", {}
+
+        with tempfile.TemporaryDirectory() as directory:
+            args = argparse.Namespace(ipv6=True, network=None, output=Path(directory)/"devices.json",
+                                      force=True, username="admin", ssl=False, insecure=False,
+                                      workers=4, max_hosts=20, port=8728, timeout=1)
+            with patch.object(builder.sys, "platform", "win32"), \
+                    patch.object(builder, "discover_ipv6_neighbors", return_value={}), \
+                    patch.object(builder, "windows_ipv4_bootstrap_hosts", return_value={"192.168.99.1": "12"}), \
+                    patch.object(builder, "discover_one", discover), \
+                    patch.object(builder.getpass, "getpass", return_value="test"), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(asyncio.run(builder.run(args)), 0)
+            self.assertEqual(json.loads(args.output.read_text())["devices"],
+                             [{"name": "Glowny", "host": "fe80::1%12"}])
+
     def test_windows_broadcast_interfaces_and_numeric_scope(self):
         result = SimpleNamespace(returncode=0, stdout=json.dumps([
             {"Address": "192.168.99.10", "Prefix": 24, "Scope": 12},
