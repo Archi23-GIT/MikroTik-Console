@@ -16,6 +16,7 @@ Each MikroTik must have a configured, reachable IPv4 or IPv6 address. The Router
 - Dependencies: standard library for the core; optional Windows Tab completion uses `pyreadline3`. Install with `py -m pip install -r requirements.txt` on Windows.
 - Automated checks: GitHub Actions runs unit tests on Linux, Windows, and macOS with Python 3.12 and 3.14. This is a configured test matrix, not proof of live router/network compatibility.
 - Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Security reports: [SECURITY.md](SECURITY.md).
+- Community expectations: [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Python and operating system requirements
 

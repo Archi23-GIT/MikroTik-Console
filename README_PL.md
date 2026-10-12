@@ -16,6 +16,7 @@ Każdy MikroTik musi mieć skonfigurowany i osiągalny adres IP — IPv4 albo IP
 - Zależności: biblioteka standardowa dla podstawowych funkcji; opcjonalne podpowiedzi Tab na Windows korzystają z `pyreadline3`. Instalacja na Windows: `py -m pip install -r requirements.txt`.
 - Testy automatyczne: GitHub Actions uruchamia testy jednostkowe na Linux, Windows i macOS z Pythonem 3.12 i 3.14. Jest to skonfigurowana macierz testów, a nie potwierdzenie działania w rzeczywistej sieci routerów.
 - Współpraca: [CONTRIBUTING.md](CONTRIBUTING.md). Zgłaszanie problemów bezpieczeństwa: [SECURITY.md](SECURITY.md).
+- Zasady zachowania w społeczności: [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Wymagania dotyczące Pythona i systemu operacyjnego
 

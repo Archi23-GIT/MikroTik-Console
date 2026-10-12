@@ -1,5 +1,7 @@
 # Contributing
 
+All participation follows our [Code of Conduct](CODE_OF_CONDUCT.md).
+
 Report bugs and propose improvements through GitHub Issues. Include the application version from `VERSION`, Python version, operating system, RouterOS version, command used, expected behavior, and sanitized output. Remove passwords, tokens, and private configuration before posting. Do not attach your active `devices.json` or backups.
 
 Keep changes focused and update both `README.md` and `README_PL.md` when behavior changes. Add regression tests for meaningful bug fixes. Test doubles should avoid real router connections, credential prompts, and host network discovery.
